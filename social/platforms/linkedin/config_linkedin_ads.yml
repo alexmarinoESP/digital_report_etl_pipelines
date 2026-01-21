@@ -31,7 +31,7 @@ linkedin_ads_creative:
 linkedin_ads_campaign:
   request: get_campaigns
   q: search
-  pageSize: '10000'
+  pageSize: '1000'
   type: CAMPAIGN
   pagination: True
   nested_element: ['totalBudget', 'dailyBudget', 'unitCost']
@@ -108,7 +108,7 @@ linkedin_ads_insights:
 
 linkedin_ads_campaign_audience:
   q: search
-  count: '10000'
+  pageSize: '1000'
   type: CAMPAIGN
   request: get_campaigns
   #fields: ['targetingCriteria','id']

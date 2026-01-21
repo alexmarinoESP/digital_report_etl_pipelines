@@ -246,10 +246,20 @@ class SocialRepository:
         col_len = len(data.columns)
         col_name = ",".join(data.columns)
         buff_string = ("{}|" * col_len)[:-1] + "\n"
-        sql_query = f"COPY {schema}.{table_name} ({col_name}) FROM STDIN NO ESCAPE null 'None' ABORT ON ERROR"
+        # Removed NO ESCAPE to allow backslash escaping of pipe delimiters
+        sql_query = f"COPY {schema}.{table_name} ({col_name}) FROM STDIN null 'None' ABORT ON ERROR"
 
-        for row in data.values.tolist():
-            buff.write(buff_string.format(*row))
+        for idx, row in enumerate(data.values.tolist()):
+            # Escape pipe and backslash characters in string values
+            escaped_row = []
+            for val in row:
+                if isinstance(val, str):
+                    # Escape backslash first, then pipe
+                    escaped_val = val.replace("\\", "\\\\").replace("|", "\\|")
+                    escaped_row.append(escaped_val)
+                else:
+                    escaped_row.append(val)
+            buff.write(buff_string.format(*escaped_row))
 
         try:
             cur.copy(sql_query, buff.getvalue())

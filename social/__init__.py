@@ -11,6 +11,10 @@ from pathlib import Path
 from typing import Dict, Any
 
 import yaml
+from dotenv import load_dotenv
+
+# Load .env file if it exists (important for local development)
+load_dotenv()
 
 from shared.utils.env import get_env
 

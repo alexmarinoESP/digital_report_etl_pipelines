@@ -57,7 +57,7 @@ WHERE segments.date BETWEEN '{}' AND '{}'
 # Placement queries
 query_placement = """
 SELECT
-    ad_group_ad.ad.id,
+    group_placement_view.resource_name,
     group_placement_view.placement,
     group_placement_view.placement_type,
     group_placement_view.display_name,
@@ -73,7 +73,7 @@ AND campaign.status = 'ENABLED'
 
 query_placement_2 = """
 SELECT
-    ad_group_ad.ad.id,
+    group_placement_view.resource_name,
     group_placement_view.placement,
     group_placement_view.placement_type,
     group_placement_view.display_name,
@@ -91,21 +91,23 @@ AND campaign.status = 'PAUSED'
 query_audience = """
 SELECT
     ad_group.id,
-    ad_group_audience_view.display_name,
+    ad_group_criterion.display_name,
     customer.id
-FROM ad_group_audience_view
+FROM ad_group_criterion
 WHERE segments.date BETWEEN '{}' AND '{}'
 AND campaign.status = 'ENABLED'
+AND ad_group_criterion.type IN ('USER_LIST', 'USER_INTEREST', 'AUDIENCE')
 """
 
 query_audience_2 = """
 SELECT
     ad_group.id,
-    ad_group_audience_view.display_name,
+    ad_group_criterion.display_name,
     customer.id
-FROM ad_group_audience_view
+FROM ad_group_criterion
 WHERE segments.date BETWEEN '{}' AND '{}'
 AND campaign.status = 'PAUSED'
+AND ad_group_criterion.type IN ('USER_LIST', 'USER_INTEREST', 'AUDIENCE')
 """
 
 # Ad report query
