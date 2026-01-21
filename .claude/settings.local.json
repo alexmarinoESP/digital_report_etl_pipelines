@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C \"c:/Users/Alex.Marino/Progetti/digital_report_etl_pipelines\" status)",
+      "Bash(find:*)"
+    ]
+  }
+}

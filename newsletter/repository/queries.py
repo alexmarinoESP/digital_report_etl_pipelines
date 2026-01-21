@@ -1,0 +1,30 @@
+"""
+SQL queries for newsletter data retrieval.
+"""
+
+# Query for Mapp newsletter HTML
+query_mapp_html = """
+SELECT DISTINCT d.COMPANYID, f.MESSAGE_EXTERNALID AS NEWSLETTERID, f.MESSAGE_ID, max(f.USER_ID) as CONTACT_ID,
+min(f.USER_ID) as CONTACT_ID_2
+FROM ESPODS.ESP_ODS_MAPP_RENDER f
+JOIN ESPDDS.ESP_DCAMPAIGN_NEW d
+on d.newsletterid = f.message_externalid
+WHERE YEAR(CAST(f.RENDER_TIMESTAMP AS DATE)) >= YEAR(CURRENT_DATE)-{{years_behind | sqlsafe}}
+AND d.COMPANYID={{comp_id | sqlsafe}}
+GROUP BY d.COMPANYID, f.MESSAGE_EXTERNALID, f.MESSAGE_ID
+"""
+
+# Query for Dynamics newsletter HTML
+query_dynamics_html = """
+select distinct d2.COMPANYID, mm.CAMPAIGNACTIVITY_CODE as NEWSLETTERID, mm.PREVIEWHTML
+from ESPDDS.ESP_DCRM_MARKETING_EMAIL mm
+JOIN ESPDDS.CRM_CAMPAIGNINFO d
+on d.CODE = SPLIT_PART(CAMPAIGNACTIVITY_CODE, '.', 1)
+JOIN ESPDDS.ESP_DCAMPAIGN_NEW d2
+on d.CODE = d2.CAMPAIGNID
+WHERE (CASE WHEN PROPOSEDSTART is not null THEN
+       TO_CHAR(PROPOSEDSTART, 'RRRR') - 1
+       ELSE TO_CHAR(ACTUALSTART, 'RRRR') - 1 END) >= YEAR(CURRENT_DATE)-{{years_behind | sqlsafe}}
+AND d2.COMPANYID={{comp_id | sqlsafe}}  AND mm.PREVIEWHTML is not null
+ORDER BY mm.CAMPAIGNACTIVITY_CODE
+"""

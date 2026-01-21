@@ -1,0 +1,198 @@
+linkedin_ads_creative:
+  request: get_creatives
+  type: CREATIVES
+  q: criteria
+  nested_element: ['servingHoldReasons']
+  #fields: ['id', 'campaign_id', 'name', 'intendedStatus', 'type', 'lastModifiedAt', 'createdAt', 'account']
+  processing:
+    extract_id_from_urn:
+      cols: [id, campaign, account]
+    rename_column:
+      renaming:
+        status: status_0
+        campaign: campaign_id
+        intendedStatus: status
+    add_row_loaded_date:
+      params: None
+  query:
+    column_name:
+      - id
+  update:
+    fields_id:
+      - id
+    fields_update:
+      - status
+      - campaign_id
+  pagination:
+    start: 0
+    count: 100  # Adjust based on your API limits
+    loop_while_more: true
+
+linkedin_ads_campaign:
+  request: get_campaigns
+  q: search
+  pageSize: '10000'
+  type: CAMPAIGN
+  pagination: True
+  nested_element: ['totalBudget', 'dailyBudget', 'unitCost']
+  #fields: ['objectiveType','runSchedule','optimizationTargetType','costType','name','id','status', 'totalBudget','dailyBudget','account','unitCost']
+  query:
+    column_name:
+      - id
+  processing:
+    response_decoration:
+      field: account
+      new_col_name: null
+    convert_unix_timestamp_to_date:
+      columns: ['start', 'end']
+    rename_column:
+      renaming:
+        start: start_date
+        end: end_date
+    add_row_loaded_date:
+      params: None
+    convert_nat_to_nan:
+      columns: ['end_date','start_date']
+    modify_name:
+      cols: ['name']
+  update:
+    fields_id:
+      - id
+    fields_update:
+      - end_date
+      - account
+
+
+linkedin_ads_insights:
+  request: get_insights
+  type: ANALYTICS
+  q: analytics
+  nested_element: ['dateRange']
+  fields: ['actionClicks','adUnitClicks','clicks','comments','costInLocalCurrency', 'landingPageClicks','likes','reactions','shares','totalEngagements','dateRange','pivotValues','impressions','externalWebsiteConversions','conversionValueInLocalCurrency']
+  query:
+    column_name:
+      - creative_id
+      - date
+  processing:
+    build_date_field:
+      fields_date: ['year', 'month', 'day']
+      begin_end: ['start', 'end']
+    replace_nan_with_zero:
+      columns: ['costInLocalCurrency', 'conversionValueInLocalCurrency']
+    response_decoration:
+      field: pivotValues
+      new_col_name: creative_id
+    add_row_loaded_date:
+      params: None
+  merge:
+    table_name_source: linkedin_ads_insights_source
+    fields_id:
+      - creative_id
+      - date
+    table_name_check:
+      - linkedin_ads_insights
+    fields_update:
+      - actionClicks
+      - adUnitClicks
+      - impressions
+      - clicks
+      - comments
+      - landingPageClicks
+      - externalWebsiteConversions
+      - likes
+      - reactions
+      - shares
+      - totalEngagements
+      - costInLocalCurrency
+      - conversionValueInLocalCurrency
+
+linkedin_ads_campaign_audience:
+  q: search
+  count: '10000'
+  type: CAMPAIGN
+  request: get_campaigns
+  #fields: ['targetingCriteria','id']
+  query:
+    column_name:
+      - id
+  processing:
+    convert_string:
+      columns:
+      - id
+    add_row_loaded_date:
+      params: None
+  update:
+    fields_id:
+      - id
+    fields_update:
+      - audience_id
+
+
+SOCIAL_ADS_POSTS_ACCESS_CODE:
+  avoid_request: True
+  query:
+    column_name:
+      - SOCIAL
+      - ACCESS_TOKEN
+
+linkedin_ads_account:
+  q: search
+  request: get_account
+  type: ACCOUNT
+  #fields: ['name', 'currency', 'id', 'status']
+  query:
+    column_name:
+      - id
+  processing:
+    add_company:
+      params: None
+    add_row_loaded_date:
+      params: None
+  update:
+    fields_id:
+      - id
+    fields_update:
+      - status
+#
+#
+#
+#
+linkedin_ads_audience:
+  q: accounts
+  request: get_audience
+  type: AUDIENCE
+  pagination: True
+  count: '400'
+  #fields: ['account','id','name','description']
+  query:
+    column_name:
+      - id
+  processing:
+    modify_urn_li_sponsoredAccount:
+      params: None
+    add_row_loaded_date:
+      params: None
+#
+#
+
+
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#
+#

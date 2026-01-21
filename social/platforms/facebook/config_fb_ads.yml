@@ -1,0 +1,192 @@
+fb_ads_audience_adset:
+  type: get_ad_sets
+  date_preset:  last_7d
+  fields: fields_ads_audience_adset
+  processing:
+    add_row_loaded_date:
+      params: None
+    modify_name:
+      cols: ['name']
+
+  scope: account
+  query:
+    column_name:
+      - audience_id
+      - adset_id
+  delete:
+    period: CURRENT_DATE()-90
+
+fb_ads_campaign:
+  type: get_campaigns
+  fields: fields_ads_campaign
+  date_preset: last_7d
+  processing:
+    rename_columns:
+      col_dict:
+        id: campaign_id
+    deal_with_date:
+      cols: [created_time]
+  scope: account
+  query:
+    column_name:
+      - campaign_id
+  update:
+    fields_id:
+      - campaign_id
+    fields_update:
+      - status
+      - effective_status
+
+
+fb_ads_insight:
+  type: get_insights
+  fields: fields_ads_insight
+  date_preset: maximum
+  processing:
+    modify_name:
+      cols: ['ad_name', 'name']
+    drop_columns:
+      cols: ['date_stop','date_start']
+    add_row_loaded_date:
+      params: None
+
+  query:
+    column_name:
+      - campaign_id
+      - adset_id
+      - ad_id
+      - account_id
+  merge:
+    table_name_source: fb_ads_insight_source
+    fields_id:
+      - ad_id
+    fields_update:
+      - reach
+      - inline_link_clicks
+      - inline_link_click_ctr
+      - cpc
+      - cpm
+      - impressions
+      - spend
+      - ctr
+      - clicks
+  scope: account
+
+
+fb_ads_insight_actions:
+  type: get_insights
+  fields: fields_ads_insight_actions
+  date_preset: last_14d
+  processing:
+
+    convert_actions_to_df:
+      params: None
+    extract_custom_conversion_id:
+      params: None
+    nan_conversion:
+      params: None
+    add_row_loaded_date:
+      params: None
+
+  query:
+    column_name:
+      - ad_id
+      - action_type
+  scope: account
+  merge:
+    table_name_source: fb_ads_insight_actions_source
+    fields_id:
+      - ad_id
+      - action_type
+    check_update: # id column of the table to check
+      - ad_id
+      - last_updated_date
+    table_name_check:
+      - fb_ads_insight
+    fields_update:
+      - value
+#
+#
+##fb_ads_ad_creatives:
+##  type: get_ad_creatives
+##  fields: fields_ads_creative
+##  date_preset: last_3d
+##  processing:
+##    rename_columns:
+##      col_dict:
+##        id: ad_id
+##        actor_id: page_id
+##    utf_8_encoding:
+##      cols: ['name','body']
+##  query:
+##    column_name:
+##      - account_id
+##      - ad_id
+##  scope: account
+##
+##
+###fb_ads_ad_account:
+###  type: get_owned_ad_accounts
+###  fields: fields_account_info
+###
+###  processing:
+###    convert_to_df:
+###      params: None
+###    add_companyid:
+###      params: None
+###    deal_with_date:
+###      table: 'fb_ads_ad_account'
+###    add_row_loaded_date:
+###      params: None
+###
+###  scope: business
+###  query:
+###    column_name:
+###      - account_id
+###  update:
+###    fields_id:
+###      - account_id
+###    fields_update:
+###      - age
+##
+##
+fb_ads_custom_conversion:
+  type: get_custom_conversions
+  fields: fields_custom_convers
+  date_preset: last_7d
+  processing:
+    rename_columns:
+      col_dict:
+        id: conversion_id
+    extract_pixel_rule:
+      params: None
+
+  query:
+    column_name:
+      - conversion_id
+  scope: account
+
+
+fb_ads_ad_set:
+  type: get_ad_sets
+  date_preset:  last_7d # this_month
+  fields: fields_ads_adset
+  processing:
+    deal_with_date:
+      cols: ['start_time','end_time']
+  scope: account
+  query:
+    column_name:
+      - id
+  update:
+    fields_id:
+      - id
+    fields_update:
+      - end_time
+##
+
+####
+####
+####
+####
+####
