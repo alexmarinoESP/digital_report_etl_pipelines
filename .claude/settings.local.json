@@ -2,7 +2,15 @@
   "permissions": {
     "allow": [
       "Bash(git -C \"c:/Users/Alex.Marino/Progetti/digital_report_etl_pipelines\" status)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(python:*)",
+      "Bash(.venv/Scripts/activate)",
+      "Bash(.venv/Scripts/python.exe:*)",
+      "Bash(uv pip install:*)",
+      "Bash(uv add:*)",
+      "Bash(uv sync:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(uv run python:*)"
     ]
   }
 }

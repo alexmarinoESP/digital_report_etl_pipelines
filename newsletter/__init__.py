@@ -1,13 +1,44 @@
 """
 Newsletter module for digital report ETL pipelines.
 Renders newsletter HTML to images for digital reports.
+
+Architecture:
+    newsletter/
+    ├── domain/          # Models and interfaces (no dependencies)
+    │   ├── models.py    # Newsletter, NewsletterImage, Company, PipelineStats
+    │   └── interfaces.py # Abstract interfaces for adapters
+    ├── adapters/        # External service implementations
+    │   ├── mapp_adapter.py      # Mapp Newsletter API
+    │   ├── hcti_adapter.py      # HTML to image rendering
+    │   ├── s3_adapter.py        # S3/Minio storage
+    │   ├── local_storage_adapter.py  # Local filesystem
+    │   └── repository_adapter.py     # Vertica database
+    ├── services/        # Business logic
+    │   ├── html_cleaner.py      # HTML sanitization
+    │   ├── image_cropper.py     # Smart image cropping
+    │   ├── extraction_service.py
+    │   ├── rendering_service.py
+    │   └── upload_service.py
+    ├── pipeline.py      # Main orchestrator
+    └── scripts/         # CLI entry points
+        └── test_newsletter.py
+
+Usage:
+    from newsletter.pipeline import PipelineFactory
+
+    # Production (S3 storage)
+    pipeline = PipelineFactory.create_default()
+    result = pipeline.run()
+
+    # Testing (local storage)
+    pipeline = PipelineFactory.create_with_local_storage("./output")
+    result = pipeline.run(companies=[Company.IT], sources=["dynamics"])
 """
 
 import os
 import sys
 import re
 from pathlib import Path
-from enum import Enum
 from typing import Dict, Any
 
 import yaml
@@ -15,29 +46,11 @@ import yaml
 from shared.utils.env import get_env
 
 
-# Company mapping
-COMPANY_DICT = {"it": 1, "es": 2, "pt": 3, "vvit": 32}
-COMP_PREVIEW = ["it", "es", "vvit"]
+# =============================================================================
+# Configuration
+# =============================================================================
 
-# Module root
 _ROOT = Path(os.path.dirname(__file__)).absolute()
-
-
-class Endpoint(Enum):
-    """Mapp API endpoints."""
-    preview = "message/getHistorical"
-
-
-class Company(Enum):
-    """Company enumeration with (code, id) pairs."""
-    IT = ("it", 1)
-    ES = ("es", 2)
-    PT = ("pt", 3)
-    VVIT = ("vvit", 32)
-
-    def __init__(self, code: str, company_id: int):
-        self.code = code
-        self.company_id = company_id
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
@@ -85,3 +98,27 @@ BUCKET_NAME = get_env("S3_BUCKET_NAME", "report-digital-preview")
 
 # Load config
 config = get_config()
+
+
+# =============================================================================
+# Public API
+# =============================================================================
+
+from newsletter.domain.models import Company, Newsletter, NewsletterImage, PipelineStats
+from newsletter.pipeline import NewsletterPipeline, PipelineFactory, PipelineResult
+
+__all__ = [
+    # Configuration
+    "config",
+    "TMPDATA_PATH",
+    "BUCKET_NAME",
+    # Domain models
+    "Company",
+    "Newsletter",
+    "NewsletterImage",
+    "PipelineStats",
+    # Pipeline
+    "NewsletterPipeline",
+    "PipelineFactory",
+    "PipelineResult",
+]
