@@ -43,4 +43,9 @@ COPY newsletter/ ./newsletter/
 # Create data directory
 RUN mkdir -p /app/data
 
-CMD ["python", "-m", "newsletter.scripts.get_data"]
+# Default: run full pipeline
+# Override with docker run args for specific options:
+#   --companies it es vvit
+#   --sources mapp dynamics
+#   --years-behind 2
+CMD ["python", "-m", "newsletter.scripts.run_pipeline"]

@@ -751,12 +751,15 @@ name = "digital-report-etl-pipelines"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [
+    { name = "beautifulsoup4" },
     { name = "jinja2" },
     { name = "jinjasql" },
     { name = "joblib" },
     { name = "loguru" },
+    { name = "minio" },
     { name = "openpyxl" },
     { name = "pandas" },
+    { name = "pillow" },
     { name = "pydantic" },
     { name = "python-dateutil" },
     { name = "python-dotenv" },
@@ -825,6 +828,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "beautifulsoup4", specifier = ">=4.14.3" },
     { name = "beautifulsoup4", marker = "extra == 'newsletter'", specifier = ">=4.12.0" },
     { name = "boto3", marker = "extra == 'newsletter'", specifier = ">=1.20.0" },
     { name = "curlify", marker = "extra == 'social'", specifier = ">=2.2.0" },
@@ -836,11 +840,13 @@ requires-dist = [
     { name = "jinjasql", specifier = ">=0.1.8" },
     { name = "joblib", specifier = ">=1.2.0" },
     { name = "loguru", specifier = ">=0.7.0" },
+    { name = "minio", specifier = ">=7.2.20" },
     { name = "minio", marker = "extra == 'newsletter'", specifier = ">=7.1.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "openpyxl", specifier = ">=3.1.2" },
     { name = "oracledb", marker = "extra == 'newsletter'", specifier = ">=1.0.0" },
     { name = "pandas", specifier = ">=2.0.0" },
+    { name = "pillow", specifier = ">=12.1.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.0.0" },
     { name = "proto-plus", marker = "extra == 'social'", specifier = ">=1.22.0" },
     { name = "protobuf", marker = "extra == 'social'", specifier = ">=4.21.0" },
