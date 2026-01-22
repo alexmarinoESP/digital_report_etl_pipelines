@@ -28,21 +28,23 @@ class S3StorageAdapter(IImageStorage):
     def __init__(
         self,
         bucket_name: Optional[str] = None,
-        folder: str = "correct-images",
+        folder: Optional[str] = None,
         s3_handler: Optional[S3Handler] = None,
     ):
         """
         Initialize S3 storage adapter.
 
         Args:
-            bucket_name: S3 bucket name (from env if not provided)
-            folder: Target folder in bucket
+            bucket_name: S3 bucket name (from env S3_BUCKET_NAME if not provided)
+            folder: Target folder in bucket (from env S3_FOLDER if not provided)
             s3_handler: Optional S3Handler instance (creates new if not provided)
         """
         self._bucket_name = bucket_name or get_env(
             "S3_BUCKET_NAME", "report-digital-preview"
         )
-        self._folder = folder
+        self._folder = folder or get_env(
+            "S3_FOLDER", "correct-images"
+        )
         self._s3 = s3_handler or S3Handler()
         self._existing_cache: Optional[List[str]] = None
 
