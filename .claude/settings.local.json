@@ -14,7 +14,9 @@
       "Bash(git -C \"c:/Users/Alessandro.Benelli/AB_locale/Progetti/digital_report_etl_pipelines\" checkout HEAD -- social/platforms/facebook)",
       "Bash(echo $VERTICA_SCHEMA)",
       "Bash(timeout 120 .venv/Scripts/python.exe -m social.test_pipeline:*)",
-      "Bash(timeout 60 .venv/Scripts/python.exe -m social.test_pipeline:*)"
+      "Bash(timeout 60 .venv/Scripts/python.exe -m social.test_pipeline:*)",
+      "Bash(timeout:*)",
+      "Bash(dir C:UsersAlessandro.BenelliAB_localeProgettidigital_report_etl_pipelinessocialplatformslinkedin)"
     ]
   }
 }

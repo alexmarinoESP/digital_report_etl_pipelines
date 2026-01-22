@@ -344,16 +344,32 @@ class FacebookAdsAdapter(BaseAdsPlatformAdapter):
 
         # Add processing steps from config
         if table_config.processing_steps:
-            for step in table_config.processing_steps:
-                # Parse step format: "step_name:param1=value1,param2=value2"
-                if ":" in step:
-                    step_name, params_str = step.split(":", 1)
-                    params = dict(p.split("=") for p in params_str.split(","))
-                else:
-                    step_name = step
-                    params = {}
-
-                pipeline.add_step(step_name, params)
+            # Handle both dict format (from YAML) and list format (legacy)
+            if isinstance(table_config.processing_steps, dict):
+                # New format: {step_name: {param1: value1, param2: value2}}
+                for step_name, step_params in table_config.processing_steps.items():
+                    # Handle various parameter formats
+                    if isinstance(step_params, dict):
+                        params = step_params
+                    elif step_params is None or step_params == "None":
+                        params = {}
+                    elif isinstance(step_params, str):
+                        # Legacy string format - skip for now
+                        logger.warning(f"Skipping step {step_name} with string params: {step_params}")
+                        continue
+                    else:
+                        params = {}
+                    pipeline.add_step(step_name, params)
+            else:
+                # Legacy format: ["step_name:param1=value1,param2=value2"]
+                for step in table_config.processing_steps:
+                    if ":" in step:
+                        step_name, params_str = step.split(":", 1)
+                        params = dict(p.split("=") for p in params_str.split(","))
+                    else:
+                        step_name = step
+                        params = {}
+                    pipeline.add_step(step_name, params)
 
         # Execute pipeline
         processed_df = pipeline.process(raw_df)

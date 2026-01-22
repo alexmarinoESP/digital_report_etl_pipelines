@@ -424,6 +424,11 @@ class VerticaDataSink:
         # Drop duplicates within the DataFrame itself
         df = df.drop_duplicates()
 
+        # Replace all NaT values with None before converting to list
+        # This is necessary because .values.tolist() converts NaT to string "NaT"
+        df = df.replace({pd.NaT: None})
+        df = df.where(pd.notna(df), None)
+
         # Build COPY statement
         columns_str = ",".join(df.columns)
         sql_query = f"COPY {self.schema}.{table_name} ({columns_str}) FROM STDIN null 'None' ABORT ON ERROR"

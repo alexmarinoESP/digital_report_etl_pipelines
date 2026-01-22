@@ -2,10 +2,12 @@
 
 This module provides token management using YAML configuration files,
 compatible with the legacy social_posts credentials structure.
+Falls back to environment variables when YAML file is not found.
 """
 
 from typing import Optional, Dict, Any
 from pathlib import Path
+import os
 import yaml
 from loguru import logger
 
@@ -47,42 +49,133 @@ class FileBasedTokenProvider:
         logger.info(f"FileBasedTokenProvider initialized for {platform}")
 
     def _load_credentials(self) -> Dict[str, Any]:
-        """Load credentials from YAML file.
+        """Load credentials from YAML file or environment variables.
 
         Returns:
             Dictionary with platform credentials
 
         Raises:
-            AuthenticationError: If credentials file not found or invalid
+            AuthenticationError: If credentials not found
         """
-        if not self.credentials_file.exists():
-            raise AuthenticationError(
-                f"Credentials file not found: {self.credentials_file}",
-                details={"platform": self.platform, "file": str(self.credentials_file)}
-            )
+        # Try loading from YAML file first
+        if self.credentials_file.exists():
+            try:
+                with open(self.credentials_file, "r", encoding="utf-8") as f:
+                    all_credentials = yaml.safe_load(f)
 
-        try:
-            with open(self.credentials_file, "r", encoding="utf-8") as f:
-                all_credentials = yaml.safe_load(f)
+                if self.platform not in all_credentials:
+                    raise AuthenticationError(
+                        f"Platform '{self.platform}' not found in credentials file",
+                        details={"platform": self.platform, "file": str(self.credentials_file)}
+                    )
 
-            if self.platform not in all_credentials:
+                logger.info(f"Loaded credentials from file for {self.platform}")
+                return all_credentials[self.platform]
+
+            except yaml.YAMLError as e:
                 raise AuthenticationError(
-                    f"Platform '{self.platform}' not found in credentials file",
+                    f"Failed to parse credentials file: {str(e)}",
                     details={"platform": self.platform, "file": str(self.credentials_file)}
                 )
-
-            return all_credentials[self.platform]
-
-        except yaml.YAMLError as e:
-            raise AuthenticationError(
-                f"Failed to parse credentials file: {str(e)}",
-                details={"platform": self.platform, "file": str(self.credentials_file)}
+            except Exception as e:
+                raise AuthenticationError(
+                    f"Failed to load credentials: {str(e)}",
+                    details={"platform": self.platform, "file": str(self.credentials_file)}
+                )
+        else:
+            # Fallback to environment variables
+            logger.warning(
+                f"Credentials file not found: {self.credentials_file}. "
+                f"Falling back to environment variables for {self.platform}"
             )
-        except Exception as e:
+            return self._load_from_env()
+
+    def _load_from_env(self) -> Dict[str, Any]:
+        """Load credentials from environment variables.
+
+        Returns:
+            Dictionary with platform credentials
+
+        Raises:
+            AuthenticationError: If required environment variables not found
+        """
+        credentials = {}
+
+        if self.platform == "facebook":
+            # Facebook environment variables
+            access_token = os.getenv("FACEBOOK_ACCESS_TOKEN")
+            app_id = os.getenv("FACEBOOK_APP_ID")
+            app_secret = os.getenv("FACEBOOK_APP_SECRET")
+            account_ids = os.getenv("FACEBOOK_ACCOUNT_IDS", "")
+
+            if not access_token or not app_id or not app_secret:
+                raise AuthenticationError(
+                    f"Missing required Facebook environment variables",
+                    details={"platform": self.platform}
+                )
+
+            credentials = {
+                "access_token": access_token,
+                "app_id": app_id,
+                "app_secret": app_secret,
+                "id_account": [acc.strip() for acc in account_ids.split(",") if acc.strip()]
+            }
+
+        elif self.platform == "linkedin":
+            # LinkedIn environment variables
+            client_id = os.getenv("LINKEDIN_CLIENT_ID")
+            client_secret = os.getenv("LINKEDIN_CLIENT_SECRET")
+            access_token = os.getenv("LINKEDIN_ACCESS_TOKEN")
+            refresh_token = os.getenv("LINKEDIN_REFRESH_TOKEN")
+
+            if not client_id or not client_secret:
+                raise AuthenticationError(
+                    f"Missing required LinkedIn environment variables",
+                    details={"platform": self.platform}
+                )
+
+            credentials = {
+                "client_id": client_id,
+                "client_secret": client_secret
+            }
+
+            # Add access_token and refresh_token if available
+            if access_token:
+                credentials["access_token"] = access_token
+            if refresh_token:
+                credentials["refresh_token"] = refresh_token
+
+        elif self.platform == "google":
+            # Google Ads environment variables
+            manager_ids = os.getenv("GOOGLE_ADS_MANAGER_IDS", "")
+            api_version = os.getenv("GOOGLE_ADS_API_VERSION", "v19")
+            developer_token = os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN")
+            client_id = os.getenv("GOOGLE_ADS_CLIENT_ID")
+            client_secret = os.getenv("GOOGLE_ADS_CLIENT_SECRET")
+            refresh_token = os.getenv("GOOGLE_ADS_REFRESH_TOKEN")
+
+            if not developer_token or not client_id or not client_secret or not refresh_token:
+                raise AuthenticationError(
+                    f"Missing required Google Ads environment variables",
+                    details={"platform": self.platform}
+                )
+
+            credentials = {
+                "manager_id": [mid.strip() for mid in manager_ids.split(",") if mid.strip()],
+                "version": api_version,
+                "developer_token": developer_token,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": refresh_token
+            }
+        else:
             raise AuthenticationError(
-                f"Failed to load credentials: {str(e)}",
-                details={"platform": self.platform, "file": str(self.credentials_file)}
+                f"Unknown platform: {self.platform}",
+                details={"platform": self.platform}
             )
+
+        logger.info(f"Loaded credentials from environment for {self.platform}")
+        return credentials
 
     def get_access_token(self) -> str:
         """Get access token for the platform.

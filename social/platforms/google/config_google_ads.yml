@@ -1,10 +1,17 @@
+# Platform configuration for Google Ads
+# Note: Google Ads uses gRPC/Protobuf SDK instead of REST API
+# The api_base_url is not used but required by BaseAdsPlatformAdapter validation
+platform:
+  api_base_url: "https://googleads.googleapis.com"  # Not actually used (gRPC)
+  api_version: "v18"
+
 google_ads_violation:
   queryget: [query_violation_policy]
   type: SearchGoogleAdsRequest
   processing:
     handle_columns:
       params: None
-    rename_columns:
+    google_rename_columns:
       params: None
     dropna_value:
       params: None
@@ -28,7 +35,7 @@ google_ads_placement:
   processing:
     handle_columns:
       params: None
-    rename_columns:
+    google_rename_columns:
       params: None
     add_row_loaded_date:
       params: None
@@ -58,7 +65,7 @@ google_ads_ad_creatives:
   queryget: [query_ads_ad_creatives]
   type: SearchGoogleAdsStreamRequest
   processing:
-    rename_columns:
+    google_rename_columns:
       params: None
     handle_columns:
       params: None
@@ -79,7 +86,7 @@ google_ads_campaign:
       params: None
     deal_with_date:
       cols: ['startdate','enddate']
-    rename_columns:
+    google_rename_columns:
       params: None
     modify_name:
       cols: ['name']
@@ -113,7 +120,7 @@ google_ads_report:
   queryget: [query_ad_report]
   type: SearchGoogleAdsStreamRequest
   processing:
-    rename_columns:
+    google_rename_columns:
       params: None
     handle_columns:
       params: None
@@ -161,7 +168,7 @@ google_ads_audience:
   processing:
     handle_columns:
       params: None
-    rename_columns:
+    google_rename_columns:
       params: None
     add_row_loaded_date:
       params: None
@@ -186,7 +193,7 @@ google_ads_cost_by_device:
   processing:
     handle_columns:
       params: None
-    rename_columns:
+    google_rename_columns:
       params: None
     convert_costs:
       col: ['cost_micros','costmicros','averagecpm','averagecost','averagecpc']
@@ -218,7 +225,7 @@ google_ads_cost_by_device:
 #  processing:
 #    handle_columns:
 #      params: None
-#    rename_columns:
+#    google_rename_columns:
 #      params: None
 #    convert_costs:
 #      col: ['cost_micros','costmicros','averagecpm','averagecost','averagecpc']
@@ -240,7 +247,7 @@ google_ads_account:
   queryget:
   request:
   processing:
-    rename_columns:
+    google_rename_columns:
       params: None
     modify_name:
       cols: ['descriptive_name']

@@ -381,7 +381,12 @@ class ConvertNaTToNanStrategy(ProcessingStrategy):
             if col not in df.columns:
                 continue
 
+            # Replace NaT with None and also replace string "NaT" just in case
             df[col] = df[col].replace({pd.NaT: None})
+            df[col] = df[col].replace("NaT", None)
+            # Also handle datetime columns with NaT
+            if df[col].dtype == 'datetime64[ns]':
+                df[col] = df[col].where(df[col].notna(), None)
 
         return df
 
@@ -463,3 +468,68 @@ class ResponseDecorationStrategy(ProcessingStrategy):
 
     def get_name(self) -> str:
         return "response_decoration"
+
+
+class GoogleRenameColumnsStrategy(ProcessingStrategy):
+    """Rename Google Ads columns using hardcoded mapping.
+    
+    This strategy is specific to Google Ads and handles the standard column
+    naming conventions from the Google Ads API (e.g., camelCase, dots in names).
+    """
+
+    # Hardcoded mapping from Google Ads API names to standard names
+    GOOGLE_COLUMN_MAPPING = {
+        "startdate": "start_date",
+        "enddate": "end_date",
+        "servingstatus": "serving_status",
+        "activeviewctr": "active_view_ctr",
+        "customer_id": "customer_id_google",
+        "customer.id": "customer_id_google",
+        "placementtype": "placement_type",
+        "resourcename": "resource_name",
+        "resourceName": "resource_name",
+        "timeZone": "time_zone",
+        "displayname": "display_name",
+        "descriptiveName": "descriptive_name",
+        "targeturl": "target_url",
+        "costMicros": "cost_micros",
+        "costmicros": "cost_micros",
+        "clientcustomer": "client_customer",
+        "clientCustomer": "client_customer",
+        "timezone": "time_zone",
+        "descriptivename": "descriptive_name",
+        "currencycode": "currency_code",
+        "currencyCode": "currency_code",
+        "campaign.id": "campaign_id",
+        "adGroup.id": "adgroup_id",
+        "ad.id": "ad_id",
+    }
+
+    def process(self, df: pd.DataFrame, **kwargs) -> pd.DataFrame:
+        """Rename columns using Google Ads mapping.
+
+        Args:
+            df: DataFrame with Google Ads column names
+            **kwargs: Ignored (no additional parameters needed)
+
+        Returns:
+            DataFrame with renamed columns
+        """
+        if df.empty:
+            return df
+
+        # Only rename columns that exist in the DataFrame
+        rename_dict = {
+            old_name: new_name
+            for old_name, new_name in self.GOOGLE_COLUMN_MAPPING.items()
+            if old_name in df.columns
+        }
+
+        if rename_dict:
+            df = df.rename(columns=rename_dict)
+            logger.debug(f"Renamed {len(rename_dict)} Google Ads columns")
+
+        return df
+
+    def get_name(self) -> str:
+        return "google_rename_columns"

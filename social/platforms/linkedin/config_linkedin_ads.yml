@@ -1,3 +1,7 @@
+platform:
+  api_base_url: "https://api.linkedin.com/rest"
+  api_version: "202509"
+
 linkedin_ads_creative:
   request: get_creatives
   type: CREATIVES
@@ -126,14 +130,6 @@ linkedin_ads_campaign_audience:
       - id
     fields_update:
       - audience_id
-
-
-SOCIAL_ADS_POSTS_ACCESS_CODE:
-  avoid_request: True
-  query:
-    column_name:
-      - SOCIAL
-      - ACCESS_TOKEN
 
 linkedin_ads_account:
   q: search

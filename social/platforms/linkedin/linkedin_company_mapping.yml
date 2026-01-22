@@ -1,0 +1,12 @@
+# LinkedIn Ads Account to Company ID mapping
+# This file maps LinkedIn sponsored account IDs to internal company IDs
+
+account_to_company:
+  "503427986": 1
+  "510686676": 1
+  "512866551": 30  # Zeliatech
+  "512065861": 23  # V-valley PT
+  "506509802": 32  # V-Valley IT
+  "506522380": 19  # DACOM
+  "511420282": 2
+  "511422249": 20  # V-valley ES

@@ -25,11 +25,13 @@ fb_ads_campaign:
   fields: fields_ads_campaign
   date_preset: last_7d
   processing:
-    rename_columns:
-      col_dict:
+    rename_column:
+      renaming:
         id: campaign_id
-    deal_with_date:
-      cols: [created_time]
+    convert_unix_timestamp_to_date:
+      columns: [created_time]
+    convert_nat_to_nan:
+      columns: [created_time]
   scope: account
   query:
     column_name:
@@ -159,8 +161,8 @@ fb_ads_custom_conversion:
   fields: fields_custom_convers
   date_preset: last_7d
   processing:
-    rename_columns:
-      col_dict:
+    rename_column:
+      renaming:
         id: conversion_id
     extract_pixel_rule:
       params: None
@@ -176,8 +178,8 @@ fb_ads_ad_set:
   date_preset:  last_7d # this_month
   fields: fields_ads_adset
   processing:
-    deal_with_date:
-      cols: ['start_time','end_time']
+    convert_unix_timestamp_to_date:
+      columns: ['start_time','end_time']
   scope: account
   query:
     column_name:

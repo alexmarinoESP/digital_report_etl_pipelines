@@ -66,10 +66,43 @@ class DataProcessingPipeline:
             pipeline.add_steps_from_config(config)
             ```
         """
+        # Handle dict format from LinkedIn YAML: {step_name: {params...}}
+        if isinstance(processing_config, dict):
+            # Convert to list of dicts with 'name' key
+            processing_list = []
+            for step_name, step_params in processing_config.items():
+                if step_params and isinstance(step_params, dict) and step_params != {"params": None}:
+                    # Add name to params
+                    config_dict = {"name": step_name, **step_params}
+                    processing_list.append(config_dict)
+                else:
+                    # Just step name
+                    processing_list.append(step_name)
+            processing_config = processing_list
+
         for step_config in processing_config:
             if isinstance(step_config, str):
-                # Simple string format: just strategy name
-                self.add_step(step_config)
+                # String format: "strategy_name" or "strategy_name:param1=value1,param2=value2"
+                if ":" in step_config:
+                    # Parse parameters
+                    strategy_name, params_str = step_config.split(":", 1)
+                    params = {}
+                    for param in params_str.split(","):
+                        if "=" in param:
+                            key, value = param.split("=", 1)
+                            # Convert "null" string to None
+                            if value == "null":
+                                value = None
+                            # Normalize parameter names (legacy compatibility)
+                            # cols -> columns (old YAML format used 'cols')
+                            if key.strip() == "cols":
+                                params["columns"] = value
+                            else:
+                                params[key.strip()] = value
+                    self.add_step(strategy_name.strip(), params)
+                else:
+                    # Just strategy name
+                    self.add_step(step_config)
             elif isinstance(step_config, dict):
                 # Dict format with parameters
                 strategy_name = step_config.get("name") or step_config.get("strategy")
@@ -82,6 +115,10 @@ class DataProcessingPipeline:
                     k: v for k, v in step_config.items()
                     if k not in ["name", "strategy"]
                 }
+
+                # Normalize parameter names for legacy compatibility
+                if "cols" in params:
+                    params["columns"] = params.pop("cols")
 
                 self.add_step(strategy_name, params)
             else:

@@ -348,29 +348,18 @@ class GoogleAdsAdapter(BaseAdsPlatformAdapter):
             return raw_df
 
         # Create processing pipeline
-        pipeline = DataProcessingPipeline(strategy_factory=self.processing_factory)
+        pipeline = DataProcessingPipeline(factory=self.processing_factory)
 
         # Add processing steps from config
         if table_config.processing_steps:
             for step in table_config.processing_steps:
-                if isinstance(step, dict):
-                    # Dict format: {"name": "step_name", "param1": value1, ...}
-                    step_name = step.get("name")
-                    params = {k: v for k, v in step.items() if k != "name"}
-                    # Map 'cols' to 'columns' if needed (Google config uses 'cols')
-                    if "cols" in params and "columns" not in params:
-                        params["columns"] = params.pop("cols")
-                elif isinstance(step, str):
-                    # String format: "step_name" or "step_name:param1=value1,param2=value2"
-                    if ":" in step:
-                        step_name, params_str = step.split(":", 1)
-                        params = dict(p.split("=") for p in params_str.split(","))
-                    else:
-                        step_name = step
-                        params = {}
+                # Parse step format: "step_name:param1=value1,param2=value2"
+                if ":" in step:
+                    step_name, params_str = step.split(":", 1)
+                    params = dict(p.split("=") for p in params_str.split(","))
                 else:
-                    logger.warning(f"Unknown step format: {step}, skipping")
-                    continue
+                    step_name = step
+                    params = {}
 
                 pipeline.add_step(step_name, params)
 
@@ -397,72 +386,3 @@ class GoogleAdsAdapter(BaseAdsPlatformAdapter):
             return []
         else:
             return ["google_ads_account"]
-
-    # =========================================================================
-    # Abstract method implementations (required by BaseAdsPlatformAdapter)
-    # Note: These methods are NOT used by Google Ads adapter as it uses the
-    # official Google Ads SDK (gRPC/Protobuf) instead of REST API
-    # =========================================================================
-
-    def _build_request_url(self, table_config: TableConfig, **params) -> str:
-        """Build request URL (not used - Google Ads uses gRPC SDK).
-
-        Google Ads adapter uses the official SDK which handles request
-        construction internally. This method is required by the base class
-        but not used in practice.
-
-        Args:
-            table_config: Table configuration
-            **params: Additional parameters
-
-        Returns:
-            Empty string (not applicable for Google Ads)
-        """
-        return ""
-
-    def _build_request_headers(self, table_config: TableConfig) -> Dict[str, str]:
-        """Build request headers (not used - Google Ads uses gRPC SDK).
-
-        Google Ads authentication is handled via google-ads.yaml config file
-        and OAuth2 tokens managed by the SDK. This method is required by the
-        base class but not used in practice.
-
-        Args:
-            table_config: Table configuration
-
-        Returns:
-            Empty dict (not applicable for Google Ads)
-        """
-        return {}
-
-    def _build_request_params(self, table_config: TableConfig, **kwargs) -> Dict[str, Any]:
-        """Build request parameters (not used - Google Ads uses GAQL queries).
-
-        Google Ads uses GAQL (Google Ads Query Language) instead of REST
-        query parameters. This method is required by the base class but not
-        used in practice.
-
-        Args:
-            table_config: Table configuration
-            **kwargs: Additional parameters
-
-        Returns:
-            Empty dict (not applicable for Google Ads)
-        """
-        return {}
-
-    def _parse_response(self, response: Dict[str, Any], table_name: str) -> List[Dict[str, Any]]:
-        """Parse API response (not used - handled by GoogleAdsHTTPClient).
-
-        Response parsing is handled internally by GoogleAdsHTTPClient which
-        converts Protobuf responses to DataFrames. This method is required by
-        the base class but not used in practice.
-
-        Args:
-            response: API response
-            table_name: Table name
-
-        Returns:
-            Empty list (not applicable for Google Ads)
-        """
-        return []

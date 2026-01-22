@@ -93,7 +93,7 @@ class TableConfig:
     request_type: str = "GET"
     page_size: int = 100
     fields: Optional[List[str]] = None
-    processing_steps: List[str] = field(default_factory=list)
+    processing_steps: Any = field(default_factory=dict)  # Can be Dict or List for backward compatibility
     additional_params: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -300,8 +300,22 @@ class ConfigurationManager:
                 continue
 
             # Determine endpoint based on platform structure
-            # LinkedIn uses "request", Google uses "queryget", Facebook uses "type"
-            endpoint = table_data.get("request") or table_data.get("queryget") or table_data.get("type") or table_name
+            # LinkedIn: uses "type" to resolve endpoint from LinkedinEndPoint enum
+            # Google: uses "queryget"
+            # Facebook: uses "type" directly
+            if platform == "linkedin" and "type" in table_data:
+                # LinkedIn: resolve endpoint from LinkedinEndPoint[type].value
+                # Import here to avoid circular dependency
+                from social.platforms.linkedin.endpoints import LinkedinEndPoint
+                type_key = table_data.get("type")
+                try:
+                    endpoint = LinkedinEndPoint[type_key].value
+                except KeyError:
+                    logger.warning(f"LinkedIn endpoint type '{type_key}' not found in LinkedinEndPoint, using as-is")
+                    endpoint = type_key
+            else:
+                # Other platforms: use "request", "queryget", or "type" directly
+                endpoint = table_data.get("request") or table_data.get("queryget") or table_data.get("type") or table_name
 
             # Convert endpoint to string if it's a list (for Google queryget)
             if isinstance(endpoint, list):
@@ -309,17 +323,31 @@ class ConfigurationManager:
 
             # Build additional_params - keep "type" for Facebook/Google platforms
             # as they use it for API method names
-            exclude_keys = ["request", "pageSize", "fields", "processing"]
+            # Keep "request" for LinkedIn (method name to call like get_campaigns)
+            exclude_keys = ["pageSize", "fields", "processing"]
             if platform == "linkedin":
-                exclude_keys.append("type")  # LinkedIn doesn't need type in additional_params
+                exclude_keys.append("type")  # LinkedIn type is used for endpoint resolution only
+            else:
+                exclude_keys.append("request")  # Other platforms don't use request field
+
+            # Parse processing steps - keep as-is for adapter to handle
+            processing_steps = table_data.get("processing", {})
+
+            # Determine HTTP request type
+            # LinkedIn: always GET (type field is for endpoint resolution)
+            # Others: use type field or default to GET
+            if platform == "linkedin":
+                request_type = "GET"
+            else:
+                request_type = table_data.get("type", "GET")
 
             tables[table_name] = TableConfig(
                 name=table_name,
                 endpoint=str(endpoint),
-                request_type=table_data.get("type", "GET"),
+                request_type=request_type,
                 page_size=int(table_data.get("pageSize", 100)),
                 fields=table_data.get("fields"),
-                processing_steps=table_data.get("processing", []),
+                processing_steps=processing_steps,
                 additional_params={
                     k: v for k, v in table_data.items()
                     if k not in exclude_keys

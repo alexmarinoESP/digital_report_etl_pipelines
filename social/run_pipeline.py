@@ -52,6 +52,7 @@ from social.core.exceptions import SocialError, ConfigurationError, APIError
 from social.core.constants import Platform, LOG_FORMAT, LOG_LEVEL_DEFAULT
 from social.infrastructure.database import VerticaDataSink
 from social.infrastructure.file_token_provider import FileBasedTokenProvider
+from social.infrastructure.database_token_provider import DatabaseTokenProvider
 from social.adapters.linkedin_adapter import LinkedInAdsAdapter
 from social.adapters.google_adapter import GoogleAdsAdapter
 from social.adapters.facebook_adapter import FacebookAdsAdapter
@@ -145,22 +146,32 @@ class SocialPipeline:
 
         logger.info(f"Pipeline initialized with {len(self.adapters)} platform(s)")
 
-    def _get_token_provider(self, platform: str) -> FileBasedTokenProvider:
+    def _get_token_provider(self, platform: str):
         """Get or create token provider for a platform.
 
         Args:
             platform: Platform name
 
         Returns:
-            FileBasedTokenProvider instance
+            TokenProvider instance (FileBasedTokenProvider or DatabaseTokenProvider)
 
         Raises:
             ConfigurationError: If token provider cannot be created
         """
         if platform not in self.token_providers:
-            self.token_providers[platform] = FileBasedTokenProvider(
-                platform=platform
-            )
+            # LinkedIn uses database for tokens (access_token/refresh_token from DB)
+            if platform == Platform.LINKEDIN.value and self.data_sink:
+                logger.debug(f"Creating DatabaseTokenProvider for LinkedIn")
+                self.token_providers[platform] = DatabaseTokenProvider(
+                    platform=platform,
+                    data_sink=self.data_sink
+                )
+            else:
+                # Other platforms use file-based tokens
+                logger.debug(f"Creating FileBasedTokenProvider for {platform}")
+                self.token_providers[platform] = FileBasedTokenProvider(
+                    platform=platform
+                )
 
         return self.token_providers[platform]
 

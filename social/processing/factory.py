@@ -22,6 +22,7 @@ from social.processing.strategies import (
     ConvertNaTToNanStrategy,
     ModifyURNAccountStrategy,
     ResponseDecorationStrategy,
+    GoogleRenameColumnsStrategy,
 )
 from social.domain.services import CompanyMappingService, URNExtractor
 from social.core.exceptions import ConfigurationError
@@ -66,6 +67,7 @@ class ProcessingStrategyFactory:
             "convert_nat_to_nan": ConvertNaTToNanStrategy,
             "modify_urn_li_sponsoredAccount": ModifyURNAccountStrategy,
             "response_decoration": ResponseDecorationStrategy,
+            "google_rename_columns": GoogleRenameColumnsStrategy,
         }
 
     def create_strategy(self, strategy_name: str) -> ProcessingStrategy:
