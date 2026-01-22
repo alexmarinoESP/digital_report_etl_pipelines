@@ -10,13 +10,8 @@ import requests
 from PIL import Image
 from loguru import logger
 
-from newsletter.domain.interfaces import IHtmlRenderer
+from newsletter.domain.interfaces import IHtmlRenderer, RenderingError
 from shared.utils.env import get_env_or_raise
-
-
-class RenderingError(Exception):
-    """Exception for rendering failures."""
-    pass
 
 
 class HctiAdapter(IHtmlRenderer):
