@@ -46,10 +46,13 @@ class PipelineResult:
     @property
     def success(self) -> bool:
         """Check if pipeline completed without critical failures."""
-        return self.images_uploaded > 0 or (
-            self.newsletters_extracted == 0 and
-            self.rendering_stats.failed == 0
+        # Success if no failures occurred in any stage
+        has_failures = (
+            self.extraction_stats.failed > 0 or
+            self.rendering_stats.failed > 0 or
+            self.upload_stats.failed > 0
         )
+        return not has_failures
 
     def __str__(self) -> str:
         return (
