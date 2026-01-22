@@ -15,7 +15,22 @@
       "Bash(echo $VERTICA_SCHEMA)",
       "Bash(timeout 120 .venv/Scripts/python.exe -m social.test_pipeline:*)",
       "Bash(timeout 60 .venv/Scripts/python.exe -m social.test_pipeline:*)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(az account:*)",
+      "Bash(az acr list:*)",
+      "Bash(az acr login:*)",
+      "Bash(docker build:*)",
+      "Bash(docker push:*)",
+      "Bash(az acr repository show-tags:*)",
+      "Bash(az containerapp job list:*)",
+      "Bash(az containerapp job update:*)",
+      "Bash(az containerapp job show:*)",
+      "Bash(az containerapp job secret --help:*)",
+      "Bash(az containerapp job secret set:*)",
+      "Bash(az ad sp create-for-rbac:*)",
+      "Bash(az ad sp list:*)",
+      "Bash(az role assignment:*)",
+      "Bash(az ad signed-in-user show:*)"
     ]
   }
 }
