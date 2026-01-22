@@ -17,6 +17,9 @@ from loguru import logger
 
 from shared.utils.env import get_env_or_raise, get_env
 
+# Disable SSL warnings for internal Minio (self-signed certificates)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 
 class S3Handler:
     """
