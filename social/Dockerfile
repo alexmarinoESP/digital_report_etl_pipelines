@@ -39,4 +39,5 @@ COPY social/ ./social/
 # Create data directory
 RUN mkdir -p /app/data
 
-CMD ["python", "-m", "social.scripts"]
+# Run the refactored pipeline
+CMD ["python", "-m", "social.run_pipeline"]
