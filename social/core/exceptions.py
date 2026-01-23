@@ -210,3 +210,44 @@ class PlatformNotSupportedError(SocialError):
     """
 
     pass
+
+
+class PipelineError(SocialError):
+    """Raised when a pipeline execution fails.
+
+    Examples:
+        - Pipeline configuration error
+        - Data extraction failure
+        - Data transformation failure
+        - Data load failure
+    """
+
+    def __init__(
+        self,
+        message: str,
+        pipeline_name: Optional[str] = None,
+        stage: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ):
+        """Initialize pipeline error.
+
+        Args:
+            message: Human-readable error message
+            pipeline_name: Name of the pipeline that failed
+            stage: Pipeline stage where error occurred (extract/transform/load)
+            details: Optional additional context
+        """
+        super().__init__(message, details)
+        self.pipeline_name = pipeline_name
+        self.stage = stage
+
+    def __str__(self) -> str:
+        """Return string representation with pipeline context."""
+        base = self.message
+        if self.pipeline_name:
+            base = f"[{self.pipeline_name}] {base}"
+        if self.stage:
+            base = f"{base} (stage: {self.stage})"
+        if self.details:
+            base = f"{base}\nDetails: {self.details}"
+        return base

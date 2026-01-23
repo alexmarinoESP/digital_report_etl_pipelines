@@ -1,159 +1,454 @@
-import math
+"""LinkedIn Ads Data Processor Module.
+
+This module provides a chainable processor for transforming LinkedIn Ads data.
+It implements the Fluent Interface pattern for clean, readable data transformations.
+
+Key Features:
+- Chainable methods (fluent interface)
+- Type-safe transformations
+- Comprehensive error handling
+- URN extraction and date handling
+- Emoji and special character cleaning
+
+Architecture:
+- LinkedInProcessor: Main processor class with chainable methods
+- Each method returns self for chaining
+- get_df() returns the final DataFrame
+"""
+
 import re
 from datetime import datetime
-from typing import List, AnyStr
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from loguru import logger
 
-from social.platforms.linkedin import company_account
+from social.platforms.linkedin.constants import COMPANY_ACCOUNT_MAP
 
 
-class LinkedinProcess:
-    def __init__(self, response: pd.DataFrame):
-        self.response = response
+class LinkedInProcessor:
+    """Chainable data processor for LinkedIn Ads data.
 
-    def get_df(self):
-        return self.response
+    This processor provides a fluent interface for transforming raw API responses
+    into clean, database-ready DataFrames.
 
-    def convert_nat_to_nan(self, columns: List):
-        for c in columns:
-            self.response[c] = self.response[c].replace({pd.NaT: None})
+    Example:
+        >>> processor = LinkedInProcessor(raw_df)
+        >>> clean_df = (processor
+        ...     .extract_id_from_urn(['id', 'campaign'])
+        ...     .add_company()
+        ...     .add_row_loaded_date()
+        ...     .get_df())
 
-    def extract_id_from_urn(self, cols: List):
-        """
-        Extract ids from urn
+    Attributes:
+        df: The DataFrame being processed
+    """
+
+    def __init__(self, df: pd.DataFrame):
+        """Initialize processor with a DataFrame.
 
         Args:
-            col:
+            df: Raw DataFrame from API response
+        """
+        self.df = df.copy() if not df.empty else pd.DataFrame()
+        logger.debug(f"LinkedInProcessor initialized with {len(self.df)} rows")
+
+    def get_df(self) -> pd.DataFrame:
+        """Get the processed DataFrame.
 
         Returns:
-
+            Processed DataFrame
         """
+        return self.df
 
-        for col in cols:
-            ids = self.response[col].apply(lambda x: re.findall(r"\d+", x)[0])
-            self.response[col] = ids
+    def extract_id_from_urn(self, columns: List[str]) -> "LinkedInProcessor":
+        """Extract numeric IDs from URN format columns.
+
+        Converts URNs like 'urn:li:sponsoredAccount:123' to '123'.
+
+        Args:
+            columns: List of column names containing URNs
+
+        Returns:
+            Self for chaining
+        """
+        if self.df.empty:
+            return self
+
+        for col in columns:
+            if col not in self.df.columns:
+                logger.warning(f"Column '{col}' not found, skipping URN extraction")
+                continue
+
+            self.df[col] = self.df[col].apply(
+                lambda x: re.findall(r"\d+", str(x))[0] if pd.notna(x) and re.findall(r"\d+", str(x)) else x
+            )
+
+        logger.debug(f"Extracted IDs from URN columns: {columns}")
+        return self
 
     def build_date_field(
         self,
-        fields_date: List = ["year", "month", "day"],
-        begin_end: List = ["start", "end"],
-        exclude: bool = True,
-    ):
-        """
-        Response from api gives date in separate field ( day, month, year)
-        Combine those field into one column
+        fields_date: List[str] = None,
+        begin_end: List[str] = None,
+        exclude: bool = True
+    ) -> "LinkedInProcessor":
+        """Build date columns from separate year/month/day fields.
+
+        LinkedIn API returns dates as separate fields (e.g., dateRange_start_year,
+        dateRange_start_month, dateRange_start_day). This method combines them
+        into proper date columns.
 
         Args:
-            fields_date: list with name of the field
-            begin_end: start,end
-            df:
-            exclude: drop old columns
+            fields_date: Date component names (default: ["year", "month", "day"])
+            begin_end: Date types (default: ["start", "end"])
+            exclude: If True, keep only start date as 'date' column
 
         Returns:
-
+            Self for chaining
         """
+        if self.df.empty:
+            return self
+
+        fields_date = fields_date or ["year", "month", "day"]
+        begin_end = begin_end or ["start", "end"]
 
         for timerange in begin_end:
-            cols = ["dateRange_{}_{}".format(
-                timerange, i) for i in fields_date]
-            self.response["date_" + timerange] = self.response[cols].apply(
+            cols = [f"dateRange_{timerange}_{field}" for field in fields_date]
+
+            # Check if all required columns exist
+            missing_cols = [col for col in cols if col not in self.df.columns]
+            if missing_cols:
+                logger.warning(f"Missing date columns: {missing_cols}, skipping date building")
+                continue
+
+            # Combine into single date string
+            self.df[f"date_{timerange}"] = self.df[cols].apply(
                 lambda x: "-".join(x.astype(str)), axis=1
             )
-            self.response["date_" + timerange] = pd.to_datetime(
-                self.response["date_" + timerange], format="%Y-%m-%d"
+
+            # Convert to datetime
+            self.df[f"date_{timerange}"] = pd.to_datetime(
+                self.df[f"date_{timerange}"],
+                format="%Y-%m-%d",
+                errors="coerce"
             )
-            self.response.drop(columns=cols, inplace=True)
 
-        if exclude:
-            self.response.drop(columns="date_end", inplace=True)
-            self.response.rename(columns={"date_start": "date"}, inplace=True)
+            # Drop component columns
+            self.df = self.df.drop(columns=cols)
 
-    def modify_name(self, cols: List, **ignored):
-        for c in cols:
-            self.response[c] = self.response[c].str.replace("|", "-")
+        # If exclude=True, keep only start date as 'date'
+        if exclude and "date_start" in self.df.columns:
+            if "date_end" in self.df.columns:
+                self.df = self.df.drop(columns=["date_end"])
+            self.df = self.df.rename(columns={"date_start": "date"})
 
-    def rename_column(self, **kwargs):
-        d_ren = kwargs.get("renaming")
-        self.response.rename(columns=d_ren, inplace=True)
+        logger.debug("Built date fields from components")
+        return self
 
-    def add_company(self, **ignored):
-        companies = []
-        for idx, row in self.response.iterrows():
-            companies.append(company_account.get(row["id"], 1))
+    def convert_unix_timestamp_to_date(self, columns: List[str]) -> "LinkedInProcessor":
+        """Convert Unix timestamp columns (milliseconds) to datetime.
 
-        self.response["companyid"] = companies
+        LinkedIn API returns timestamps in milliseconds since epoch.
 
-    def add_row_loaded_date(self, **ignored):
-        self.response["row_loaded_date"] = datetime.now()
+        Args:
+            columns: List of column names with Unix timestamps
 
-    def convert_string(self, columns):
-        for c in columns:
-            self.response[c] = self.response[c].astype(str)
+        Returns:
+            Self for chaining
+        """
+        if self.df.empty:
+            return self
 
-    def modify_urn_li_sponsoredAccount(self, **ignored):
-        self.response["account"] = self.response["account"].apply(
-            lambda x: str(x.split("urn:li:sponsoredAccount:")[1])
+        for col in columns:
+            if col not in self.df.columns:
+                logger.warning(f"Column '{col}' not found, skipping timestamp conversion")
+                continue
+
+            try:
+                # Convert from milliseconds to datetime
+                self.df[col] = pd.to_datetime(self.df[col], unit="ms", utc=True, errors="coerce")
+                logger.debug(f"Converted Unix timestamp column: {col}")
+            except Exception as e:
+                logger.error(f"Failed to convert timestamp column '{col}': {e}")
+
+        return self
+
+    def response_decoration(
+        self,
+        field: str,
+        new_col_name: Optional[str] = None
+    ) -> "LinkedInProcessor":
+        """Extract numeric ID from URN field and optionally rename column.
+
+        Args:
+            field: Column name containing URNs
+            new_col_name: Optional new column name (drops original if provided)
+
+        Returns:
+            Self for chaining
+        """
+        if self.df.empty:
+            return self
+
+        if field not in self.df.columns:
+            logger.warning(f"Column '{field}' not found, skipping response decoration")
+            return self
+
+        # Extract numeric ID using regex
+        extracted = self.df[field].apply(
+            lambda x: re.search(r"\d+", str(x)).group(0)
+            if pd.notna(x) and not isinstance(x, (int, float)) and re.search(r"\d+", str(x))
+            else x
         )
 
-    def response_decoration(self, field: AnyStr, new_col_name: AnyStr, **kwargs):
-        """
-        Extract id from urns
-        Args:
-            df:
-            field:
-            **kwargs:
-
-        Returns:
-
-        """
-
         if new_col_name:
-            try:
-                self.response[new_col_name] = self.response[field].apply(
-                    lambda x: re.search("\d+", x).group(0)
-                    if not isinstance(x, float)
-                    else x
-                )
-                self.response.drop(columns=[field], inplace=True)
-            except KeyError:
-                raise (
-                    "KeyError, Probably new_col_name isn't specified"
-                    "correctly. It should have keys equal to fields"
-                    "and value new column name you want to assign"
-                )
-
+            self.df[new_col_name] = extracted
+            self.df = self.df.drop(columns=[field])
+            logger.debug(f"Extracted ID from '{field}' to new column '{new_col_name}'")
         else:
-            self.response[field] = self.response[field].apply(
-                lambda x: re.search("\d+", x).group(0)
-                if not (isinstance(x, float) or x is None)
-                else x
-            )
+            self.df[field] = extracted
+            logger.debug(f"Extracted ID in place for column '{field}'")
 
-    def convert_unix_timestamp_to_date(self, columns: List, **ignored):
-        """
-        Date are in unix format ( integer). Convert to date
+        return self
+
+    def add_company(self, account_column: str = "id", **kwargs) -> "LinkedInProcessor":
+        """Add company ID column based on account mapping.
+
+        Uses the COMPANY_ACCOUNT_MAP from constants to map account IDs to company IDs.
+
         Args:
-            df:
+            account_column: Name of the column containing account IDs (default: "id")
 
         Returns:
-
+            Self for chaining
         """
-        for c in columns:
-            try:
-                self.response[c] = pd.to_datetime(
-                    self.response[c], unit='ms', errors='coerce'
+        if self.df.empty:
+            return self
+
+        if account_column not in self.df.columns:
+            logger.warning(f"Account column '{account_column}' not found, skipping company mapping")
+            return self
+
+        # Map account IDs to company IDs
+        self.df["companyid"] = self.df[account_column].apply(
+            lambda x: COMPANY_ACCOUNT_MAP.get(str(x), 1)  # Default to 1 if not found
+        )
+
+        logger.debug(f"Added company IDs for {len(self.df)} rows")
+        return self
+
+    def add_row_loaded_date(self) -> "LinkedInProcessor":
+        """Add row_loaded_date column with current timestamp.
+
+        Returns:
+            Self for chaining
+        """
+        if self.df.empty:
+            return self
+
+        self.df["row_loaded_date"] = datetime.now()
+        logger.debug("Added row_loaded_date column")
+        return self
+
+    def modify_name(self, columns: List[str]) -> "LinkedInProcessor":
+        """Clean special characters and emojis from name columns.
+
+        Replaces pipe characters (|) with hyphens (-) and removes emojis.
+
+        Args:
+            columns: List of column names to modify
+
+        Returns:
+            Self for chaining
+        """
+        if self.df.empty:
+            return self
+
+        for col in columns:
+            if col not in self.df.columns:
+                logger.warning(f"Column '{col}' not found, skipping name modification")
+                continue
+
+            if self.df[col].dtype == object:  # String column
+                # Replace pipe characters (used as delimiter in COPY statements)
+                self.df[col] = self.df[col].str.replace("|", "-", regex=False)
+
+                # Remove emojis using deEmojify logic
+                self.df[col] = self.df[col].apply(
+                    lambda x: self._remove_emoji(str(x)) if pd.notna(x) else x
                 )
-                # df[c].replace({np.nan: None}, inplace=True)
-                # NaT type not recognized in Vertica
 
-            except ValueError as e:
-                logger.error(e)
+        logger.debug(f"Modified name columns: {columns}")
+        return self
 
-    def replace_nan_with_zero(self, columns: List):
-        """Replaces NaN values with 0 only for specific LinkedIn Ads columns."""
-        existing_columns = [c for c in columns if c in self.response.columns]
+    def convert_nat_to_nan(self, columns: List[str]) -> "LinkedInProcessor":
+        """Convert pandas NaT (Not a Time) to None for database compatibility.
+
+        Args:
+            columns: List of column names to convert
+
+        Returns:
+            Self for chaining
+        """
+        if self.df.empty:
+            return self
+
+        for col in columns:
+            if col not in self.df.columns:
+                continue
+
+            # Replace NaT with None
+            self.df[col] = self.df[col].replace({pd.NaT: None})
+
+            # Also handle string "NaT" just in case
+            if self.df[col].dtype == object:
+                self.df[col] = self.df[col].replace("NaT", None)
+
+            # Handle datetime columns with NaT
+            if pd.api.types.is_datetime64_any_dtype(self.df[col]):
+                self.df[col] = self.df[col].where(self.df[col].notna(), None)
+
+        logger.debug(f"Converted NaT to None for columns: {columns}")
+        return self
+
+    def replace_nan_with_zero(self, columns: List[str]) -> "LinkedInProcessor":
+        """Replace NaN values with 0 for numeric columns.
+
+        Args:
+            columns: List of column names
+
+        Returns:
+            Self for chaining
+        """
+        if self.df.empty:
+            return self
+
+        existing_columns = [c for c in columns if c in self.df.columns]
 
         if existing_columns:
-            self.response[existing_columns] = self.response[existing_columns].fillna(0)
+            self.df[existing_columns] = self.df[existing_columns].fillna(0)
+            logger.debug(f"Replaced NaN with 0 for columns: {existing_columns}")
+
+        return self
+
+    def rename_column(self, renaming: Dict[str, str]) -> "LinkedInProcessor":
+        """Rename columns according to a mapping.
+
+        Args:
+            renaming: Dictionary mapping old names to new names
+
+        Returns:
+            Self for chaining
+        """
+        if self.df.empty:
+            return self
+
+        # Only rename columns that exist
+        valid_renames = {
+            old: new for old, new in renaming.items()
+            if old in self.df.columns
+        }
+
+        if valid_renames:
+            self.df = self.df.rename(columns=valid_renames)
+            logger.debug(f"Renamed {len(valid_renames)} columns")
+
+        return self
+
+    def convert_string(self, columns: List[str]) -> "LinkedInProcessor":
+        """Convert specified columns to string type.
+
+        Args:
+            columns: List of column names to convert
+
+        Returns:
+            Self for chaining
+        """
+        if self.df.empty:
+            return self
+
+        for col in columns:
+            if col not in self.df.columns:
+                logger.warning(f"Column '{col}' not found, skipping string conversion")
+                continue
+
+            self.df[col] = self.df[col].astype(str)
+
+        logger.debug(f"Converted columns to string: {columns}")
+        return self
+
+    def convert_int(self, columns: List[str]) -> "LinkedInProcessor":
+        """Convert specified columns to integer type.
+
+        Args:
+            columns: List of column names to convert
+
+        Returns:
+            Self for chaining
+        """
+        if self.df.empty:
+            return self
+
+        for col in columns:
+            if col not in self.df.columns:
+                logger.warning(f"Column '{col}' not found, skipping int conversion")
+                continue
+
+            try:
+                # Convert to numeric, coercing errors to NaN
+                self.df[col] = pd.to_numeric(self.df[col], errors='coerce')
+                # Convert to Int64 (nullable integer type)
+                self.df[col] = self.df[col].astype('Int64')
+            except Exception as e:
+                logger.error(f"Failed to convert column '{col}' to int: {e}")
+
+        logger.debug(f"Converted columns to int: {columns}")
+        return self
+
+    def modify_urn_li_sponsoredAccount(self, **kwargs) -> "LinkedInProcessor":
+        """Extract account ID from URN in 'account' column.
+
+        Specific to LinkedIn's account URN format: urn:li:sponsoredAccount:123
+
+        Returns:
+            Self for chaining
+        """
+        if self.df.empty:
+            return self
+
+        if "account" not in self.df.columns:
+            logger.warning("Column 'account' not found, skipping URN modification")
+            return self
+
+        self.df["account"] = self.df["account"].apply(
+            lambda x: str(x).split("urn:li:sponsoredAccount:")[-1]
+            if pd.notna(x) and "urn:li:sponsoredAccount:" in str(x)
+            else str(x)
+        )
+
+        logger.debug("Modified account URN column")
+        return self
+
+    @staticmethod
+    def _remove_emoji(text: str) -> str:
+        """Remove emoji characters from text.
+
+        Args:
+            text: Input text
+
+        Returns:
+            Text with emojis removed
+        """
+        emoji_pattern = re.compile(
+            "["
+            "\U0001F600-\U0001F64F"  # emoticons
+            "\U0001F300-\U0001F5FF"  # symbols & pictographs
+            "\U0001F680-\U0001F6FF"  # transport & map symbols
+            "\U0001F1E0-\U0001F1FF"  # flags (iOS)
+            "\U00002702-\U000027B0"
+            "\U000024C2-\U0001F251"
+            "]+",
+            flags=re.UNICODE
+        )
+        return emoji_pattern.sub(r'', text)

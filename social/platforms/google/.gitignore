@@ -1,0 +1,39 @@
+# Google Ads credentials files
+google-ads-*.yml
+google-ads.yaml
+
+# Token files
+tokens.json
+*.token
+
+# Output files
+*.csv
+*.json
+*.parquet
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+*~
+
+# Old/backup files
+*_old.py
+*_backup.py
+processor_old.py

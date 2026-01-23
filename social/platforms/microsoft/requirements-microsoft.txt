@@ -1,0 +1,19 @@
+# Microsoft Ads ETL Requirements
+# Minimal dependencies for Microsoft platform only
+
+# Core dependencies
+pandas==2.2.3
+loguru==0.7.3
+pyyaml==6.0.2
+python-dotenv==1.1.0
+
+# Microsoft Ads SDK
+bingads==13.0.24.2
+requests==2.32.3
+
+# Database connectors
+vertica-python==1.4.0
+azure-data-tables==12.7.0
+
+# Optional (if using Azure identity for auth)
+azure-identity==1.18.0

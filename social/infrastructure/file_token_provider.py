@@ -39,9 +39,9 @@ class FileBasedTokenProvider:
         if credentials_file:
             self.credentials_file = Path(credentials_file)
         else:
-            # Default to social_posts credentials file for backward compatibility
-            module_dir = Path(__file__).parent.parent.parent
-            self.credentials_file = module_dir / "social_posts" / "social_posts" / "credentials.yml"
+            # Default to social/config/credentials.yml
+            module_dir = Path(__file__).parent.parent
+            self.credentials_file = module_dir / "config" / "credentials.yml"
 
         # Load credentials
         self._credentials = self._load_credentials()
@@ -149,10 +149,17 @@ class FileBasedTokenProvider:
             # Google Ads environment variables
             manager_ids = os.getenv("GOOGLE_ADS_MANAGER_IDS", "")
             api_version = os.getenv("GOOGLE_ADS_API_VERSION", "v19")
+            config_file = os.getenv("GOOGLE_ADS_CONFIG_FILE")
             developer_token = os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN")
             client_id = os.getenv("GOOGLE_ADS_CLIENT_ID")
             client_secret = os.getenv("GOOGLE_ADS_CLIENT_SECRET")
             refresh_token = os.getenv("GOOGLE_ADS_REFRESH_TOKEN")
+
+            if not config_file:
+                raise AuthenticationError(
+                    f"Missing GOOGLE_ADS_CONFIG_FILE environment variable (path to google-ads.yaml)",
+                    details={"platform": self.platform}
+                )
 
             if not developer_token or not client_id or not client_secret or not refresh_token:
                 raise AuthenticationError(
@@ -163,6 +170,7 @@ class FileBasedTokenProvider:
             credentials = {
                 "manager_id": [mid.strip() for mid in manager_ids.split(",") if mid.strip()],
                 "version": api_version,
+                "config_file": config_file,
                 "developer_token": developer_token,
                 "client_id": client_id,
                 "client_secret": client_secret,

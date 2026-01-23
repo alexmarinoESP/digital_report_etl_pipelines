@@ -1,36 +1,32 @@
-"""LinkedIn Ads platform module."""
+"""
+LinkedIn Ads platform implementation.
 
-import os
+This module provides a complete independent implementation for LinkedIn Marketing API
+data extraction, following the platform-independent architecture.
 
-from social import read_config
+Key Components:
+- http_client: Custom NoQuotedCommasSession for LinkedIn's special parameter encoding
+- adapter: LinkedIn API integration for campaigns, insights, creatives, audiences
+- processor: Data transformations specific to LinkedIn (URN extraction, date building)
+- pipeline: Complete ETL pipeline orchestration
 
-# Creatives type mapping
-creatives_type = {
-    "SPONSORED_UPDATE_CAROUSEL": "SponsoredUpdateCarouselCreativeVariables",
-    "TEXT_AD": "TextAdCreativeVariables",
-    "SPONSORED_STATUS_UPDATE": "SponsoredUpdateCreativeVariables",
-    "SPONSORED_VIDEO": "SponsoredVideoCreativeVariables",
-}
+LinkedIn API Specifics:
+- API Version: 202601 (current as of 2026-01)
+- REST API with special parameter encoding (NoQuotedCommasSession)
+- URN-based resource identification
+- 150-day lookback for insights
+- Page size: 10000 (vs old 1000)
 
-# Company to account mapping
-company_account = {
-    "503427986": 1,
-    "510686676": 1,
-    "512866551": 30,  # Zeliatech
-    "512065861": 23,  # V-valley PT
-    "506509802": 32,  # V-Valley IT
-    "506522380": 19,  # DACOM
-    "511420282": 2,
-    "511422249": 20,  # V-valley ES
-}
+Architecture Principles:
+- Completely independent from other platforms (no shared base classes)
+- Protocol-based contracts for type safety
+- Dependency injection for token providers and data sinks
+- SOLID principles throughout
+"""
 
-# Default headers
-headers = {
-    "urlencoded": {"Content-Type": "application/x-www-form-urlencoded"},
-    "json": {"x-li-format": "json", "Content-Type": "application/json"},
-}
+__version__ = "1.0.0"
+__author__ = "Data Science Team"
 
-# Load LinkedIn Ads configuration
-cfg_linkedin_ads = read_config(
-    os.path.join(os.path.dirname(__file__), "config_linkedin_ads.yml")
-)
+from social.platforms.linkedin.pipeline import LinkedInPipeline
+
+__all__ = ["LinkedInPipeline"]

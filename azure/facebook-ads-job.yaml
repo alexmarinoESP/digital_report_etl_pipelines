@@ -1,0 +1,116 @@
+# Azure Container App Job Configuration
+# Facebook Ads ETL Pipeline
+# Schedule: Daily at midnight UTC
+
+apiVersion: apps/v1
+kind: Job
+metadata:
+  name: facebook-ads-etl-job
+  namespace: social-ads
+  labels:
+    app: facebook-ads-etl
+    platform: facebook
+    environment: production
+spec:
+  # Cron schedule: Daily at 00:00 UTC
+  schedule: "0 0 * * *"
+
+  # Job settings
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+
+  template:
+    metadata:
+      labels:
+        app: facebook-ads-etl
+        platform: facebook
+    spec:
+      containers:
+      - name: facebook-ads-etl
+        image: acrdigitalreportsdc.azurecr.io/facebook-ads-etl:latest
+        imagePullPolicy: Always
+
+        # Environment variables
+        env:
+        # Facebook credentials
+        - name: FACEBOOK_APP_ID
+          valueFrom:
+            secretKeyRef:
+              name: facebook-ads-secrets
+              key: app-id
+        - name: FACEBOOK_APP_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: facebook-ads-secrets
+              key: app-secret
+        - name: FACEBOOK_ACCESS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: facebook-ads-secrets
+              key: access-token
+
+        # Ad account IDs (comma-separated)
+        - name: FB_AD_ACCOUNT_IDS
+          value: "123456789,987654321"
+
+        # Storage configuration
+        - name: STORAGE_TYPE
+          value: "vertica"
+
+        # Vertica credentials
+        - name: VERTICA_HOST
+          value: "vertica11.esprinet.com"
+        - name: VERTICA_PORT
+          value: "5433"
+        - name: VERTICA_DATABASE
+          value: "Esprinet"
+        - name: VERTICA_SCHEMA
+          value: "GoogleAnalytics"
+        - name: VERTICA_USER
+          valueFrom:
+            secretKeyRef:
+              name: vertica-secrets
+              key: username
+        - name: VERTICA_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: vertica-secrets
+              key: password
+
+        # Logging
+        - name: LOG_LEVEL
+          value: "INFO"
+
+        # Token file (mounted from volume)
+        - name: CREDENTIALS_FILE
+          value: "/app/data/facebook_tokens.json"
+
+        # Resource limits
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+
+        # Volume mounts
+        volumeMounts:
+        - name: token-cache
+          mountPath: /app/data
+          readOnly: false
+
+      # Volumes
+      volumes:
+      - name: token-cache
+        persistentVolumeClaim:
+          claimName: facebook-ads-token-pvc
+
+      # Restart policy
+      restartPolicy: OnFailure
+
+      # Timeout (1 hour)
+      activeDeadlineSeconds: 3600
+
+      # Service account
+      serviceAccountName: social-ads-sa

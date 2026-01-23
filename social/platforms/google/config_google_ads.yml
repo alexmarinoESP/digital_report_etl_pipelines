@@ -3,7 +3,7 @@
 # The api_base_url is not used but required by BaseAdsPlatformAdapter validation
 platform:
   api_base_url: "https://googleads.googleapis.com"  # Not actually used (gRPC)
-  api_version: "v18"
+  api_version: "v19"
 
 google_ads_violation:
   queryget: [query_violation_policy]
@@ -89,7 +89,7 @@ google_ads_campaign:
     google_rename_columns:
       params: None
     modify_name:
-      cols: ['name']
+      columns: ['name']
     add_row_loaded_date:
       params: None
     replace_nat:
@@ -250,7 +250,7 @@ google_ads_account:
     google_rename_columns:
       params: None
     modify_name:
-      cols: ['descriptive_name']
+      columns: ['descriptive_name']
     add_row_loaded_date:
       params: None
   scope: account

@@ -1,0 +1,127 @@
+# Azure Container App Job Configuration
+# Microsoft Ads ETL Pipeline
+# Schedule: Daily at midnight UTC
+
+apiVersion: apps/v1
+kind: Job
+metadata:
+  name: microsoft-ads-etl-job
+  namespace: social-ads
+  labels:
+    app: microsoft-ads-etl
+    platform: microsoft
+    environment: production
+spec:
+  # Cron schedule: Daily at 00:00 UTC
+  schedule: "0 0 * * *"
+
+  # Job settings
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+
+  template:
+    metadata:
+      labels:
+        app: microsoft-ads-etl
+        platform: microsoft
+    spec:
+      containers:
+      - name: microsoft-ads-etl
+        image: acrdigitalreportsdc.azurecr.io/microsoft-ads-etl:latest
+        imagePullPolicy: Always
+
+        # Environment variables
+        env:
+        # Microsoft Ads credentials
+        - name: MICROSOFT_ADS_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: microsoft-ads-secrets
+              key: client-id
+        - name: MICROSOFT_ADS_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: microsoft-ads-secrets
+              key: client-secret
+        - name: MICROSOFT_ADS_DEVELOPER_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: microsoft-ads-secrets
+              key: developer-token
+        - name: MICROSOFT_ADS_CUSTOMER_ID
+          value: "253486895"
+        - name: MICROSOFT_ADS_ACCOUNT_ID
+          value: "151533935"
+
+        # Azure AD (for service principal)
+        - name: AZURE_TENANT_ID
+          valueFrom:
+            secretKeyRef:
+              name: azure-ad-secrets
+              key: tenant-id
+
+        # Storage configuration
+        - name: STORAGE_TYPE
+          value: "vertica"
+
+        # Vertica credentials
+        - name: VERTICA_HOST
+          value: "vertica11.esprinet.com"
+        - name: VERTICA_PORT
+          value: "5433"
+        - name: VERTICA_DATABASE
+          value: "Esprinet"
+        - name: VERTICA_SCHEMA
+          value: "GoogleAnalytics"
+        - name: VERTICA_USER
+          valueFrom:
+            secretKeyRef:
+              name: vertica-secrets
+              key: username
+        - name: VERTICA_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: vertica-secrets
+              key: password
+
+        # Container App specific
+        - name: CONTAINER_MODE
+          value: "true"
+
+        # Logging
+        - name: LOG_LEVEL
+          value: "INFO"
+
+        # Token file (mounted from volume)
+        - name: TOKEN_FILE
+          value: "/app/data/tokens.json"
+
+        # Resource limits
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+
+        # Volume mounts
+        volumeMounts:
+        - name: token-cache
+          mountPath: /app/data
+          readOnly: false
+
+      # Volumes
+      volumes:
+      - name: token-cache
+        persistentVolumeClaim:
+          claimName: microsoft-ads-token-pvc
+
+      # Restart policy
+      restartPolicy: OnFailure
+
+      # Timeout (1 hour)
+      activeDeadlineSeconds: 3600
+
+      # Service account
+      serviceAccountName: social-ads-sa

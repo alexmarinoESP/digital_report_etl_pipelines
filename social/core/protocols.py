@@ -258,3 +258,38 @@ class ConfigProvider(Protocol):
             ConfigurationError: If configuration not found
         """
         ...
+
+
+class PlatformAdapter(Protocol):
+    """
+    Simplified protocol for platform adapters.
+
+    Each platform (LinkedIn, Facebook, Google) implements this protocol
+    but remains completely independent - no shared base class.
+    """
+
+    def request_data(self, table: str, config: Dict[str, Any]) -> Any:
+        """
+        Request data from platform API.
+
+        Args:
+            table: Table name
+            config: Table configuration
+
+        Returns:
+            Raw API response (platform-specific format)
+        """
+        ...
+
+    def convert_to_df(self, response: Any, **kwargs) -> pd.DataFrame:
+        """
+        Convert API response to DataFrame.
+
+        Args:
+            response: Raw API response
+            **kwargs: Platform-specific parameters (e.g., nested_element)
+
+        Returns:
+            DataFrame with API data
+        """
+        ...

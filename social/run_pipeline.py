@@ -39,8 +39,9 @@ Environment Variables:
 
 import sys
 import argparse
+import yaml
 from pathlib import Path
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 from loguru import logger
 
@@ -53,9 +54,10 @@ from social.core.constants import Platform, LOG_FORMAT, LOG_LEVEL_DEFAULT
 from social.infrastructure.database import VerticaDataSink
 from social.infrastructure.file_token_provider import FileBasedTokenProvider
 from social.infrastructure.database_token_provider import DatabaseTokenProvider
-from social.adapters.linkedin_adapter import LinkedInAdsAdapter
-from social.adapters.google_adapter import GoogleAdsAdapter
-from social.adapters.facebook_adapter import FacebookAdsAdapter
+from social.platforms.linkedin.pipeline import LinkedInPipeline
+from social.platforms.google.pipeline import GooglePipeline
+from social.platforms.facebook.pipeline import FacebookPipeline
+from social.platforms.microsoft.pipeline import MicrosoftAdsPipeline
 
 
 class SocialPipeline:
@@ -104,29 +106,90 @@ class SocialPipeline:
             try:
                 logger.info(f"Initializing {platform_name} adapter...")
 
-                # Get token provider
-                token_provider = self._get_token_provider(platform_name)
+                # Microsoft uses its own authentication (no token provider needed)
+                if platform_name != Platform.MICROSOFT.value:
+                    # Get token provider for platforms that use file-based tokens
+                    token_provider = self._get_token_provider(platform_name)
 
-                # Enrich platform config with credentials from file
-                self._enrich_platform_config(platform_name, platform_config, token_provider)
+                    # Enrich platform config with credentials from file
+                    self._enrich_platform_config(platform_name, platform_config, token_provider)
+                else:
+                    token_provider = None
 
-                # Create platform-specific adapter
+                # Create platform-specific pipeline
                 if platform_name == Platform.LINKEDIN.value:
-                    adapter = LinkedInAdsAdapter(
-                        config=platform_config,
+                    # LinkedIn pipeline expects raw YAML dict, not PlatformConfig
+                    raw_config = self._load_raw_yaml_config(platform_name)
+                    adapter = LinkedInPipeline(
+                        config=raw_config,
                         token_provider=token_provider,
                         data_sink=self.data_sink
                     )
                 elif platform_name == Platform.GOOGLE.value:
-                    adapter = GoogleAdsAdapter(
-                        config=platform_config,
+                    # Get Google-specific credentials
+                    google_config_file = platform_config.additional_config.get("google_config_file")
+                    manager_customer_id = platform_config.additional_config.get("manager_customer_id", "9474097201")
+                    api_version = platform_config.additional_config.get("api_version", "v19")
+
+                    if not google_config_file:
+                        raise ConfigurationError("Google requires google_config_file (path to google-ads.yaml)")
+
+                    # Google pipeline expects raw YAML dict, not PlatformConfig
+                    raw_config = self._load_raw_yaml_config(platform_name)
+
+                    adapter = GooglePipeline(
+                        config=raw_config,
                         token_provider=token_provider,
+                        google_config_file=google_config_file,
+                        manager_customer_id=manager_customer_id,
+                        api_version=api_version,
                         data_sink=self.data_sink
                     )
                 elif platform_name == Platform.FACEBOOK.value:
-                    adapter = FacebookAdsAdapter(
-                        config=platform_config,
+                    # Get Facebook-specific credentials
+                    app_id = platform_config.additional_config.get("app_id")
+                    app_secret = platform_config.additional_config.get("app_secret")
+                    ad_account_ids = platform_config.additional_config.get("ad_account_ids", [])
+
+                    if not app_id or not app_secret:
+                        raise ConfigurationError("Facebook requires app_id and app_secret")
+
+                    # Facebook pipeline expects raw YAML dict, not PlatformConfig
+                    raw_config = self._load_raw_yaml_config(platform_name)
+
+                    adapter = FacebookPipeline(
+                        config=raw_config,
                         token_provider=token_provider,
+                        ad_account_ids=ad_account_ids,
+                        app_id=app_id,
+                        app_secret=app_secret,
+                        data_sink=self.data_sink
+                    )
+                elif platform_name == Platform.MICROSOFT.value:
+                    # Microsoft Ads pipeline (BingAds SDK)
+                    # Microsoft uses its own authentication flow via MicrosoftAdsAuthenticator
+                    import os
+                    from social.platforms.microsoft.authenticator import MicrosoftAdsAuthenticator
+
+                    # Initialize Microsoft authenticator with credentials from env
+                    authenticator = MicrosoftAdsAuthenticator(
+                        client_id=os.getenv("MICROSOFT_ADS_CLIENT_ID"),
+                        client_secret=os.getenv("MICROSOFT_ADS_CLIENT_SECRET"),
+                        developer_token=os.getenv("MICROSOFT_ADS_DEVELOPER_TOKEN"),
+                        customer_id=os.getenv("MICROSOFT_ADS_CUSTOMER_ID"),
+                        account_id=os.getenv("MICROSOFT_ADS_ACCOUNT_ID"),
+                        token_file=Path("tokens_microsoft.json")
+                    )
+
+                    # Authenticate (will use refresh token if available)
+                    tenant_id = os.getenv("AZURE_TENANT_ID")
+                    if not authenticator.authenticate(tenant_id=tenant_id):
+                        raise ConfigurationError("Microsoft Ads authentication failed")
+
+                    # Use platform_config that was already loaded by ConfigurationManager
+                    adapter = MicrosoftAdsPipeline(
+                        config=platform_config,  # Already a PlatformConfig object
+                        authenticator=authenticator,
                         data_sink=self.data_sink
                     )
                 else:
@@ -145,6 +208,37 @@ class SocialPipeline:
             raise ConfigurationError("No platform adapters could be initialized")
 
         logger.info(f"Pipeline initialized with {len(self.adapters)} platform(s)")
+
+    def _load_raw_yaml_config(self, platform: str) -> Dict[str, Any]:
+        """Load raw YAML configuration for a platform.
+
+        Args:
+            platform: Platform name (linkedin, google, facebook)
+
+        Returns:
+            Raw YAML configuration dictionary
+
+        Raises:
+            ConfigurationError: If config file not found
+        """
+        # Determine config file path
+        module_dir = Path(__file__).parent
+        config_path = module_dir / "platforms" / platform / f"config_{platform}_ads.yml"
+
+        if not config_path.exists():
+            raise ConfigurationError(f"Configuration file not found: {config_path}")
+
+        # Load YAML file
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                yaml_config = yaml.safe_load(f)
+                logger.debug(f"Loaded raw YAML config for {platform} from {config_path}")
+                return yaml_config
+        except Exception as e:
+            raise ConfigurationError(
+                f"Failed to parse YAML configuration: {config_path}",
+                details={"error": str(e)}
+            )
 
     def _get_token_provider(self, platform: str):
         """Get or create token provider for a platform.
@@ -298,13 +392,33 @@ class SocialPipeline:
         results = {}
 
         # Get tables to extract
-        tables_to_extract = tables if tables else adapter.get_all_tables()
+        # Handle different method names across platforms
+        if tables:
+            tables_to_extract = tables
+        elif hasattr(adapter, 'get_all_tables'):
+            tables_to_extract = adapter.get_all_tables()
+        elif hasattr(adapter, 'get_table_names'):
+            tables_to_extract = adapter.get_table_names()
+        else:
+            raise AttributeError(f"Adapter {platform_name} has no method to get table list")
 
         logger.info(f"Extracting {len(tables_to_extract)} tables: {', '.join(tables_to_extract)}")
 
         # Extract all tables (adapter handles dependency ordering)
         try:
-            dataframes = adapter.extract_all_tables(tables=tables_to_extract)
+            # Handle different extract methods across platforms
+            if hasattr(adapter, 'extract_all_tables'):
+                # LinkedIn/Facebook style: extract_all_tables(tables=...)
+                dataframes = adapter.extract_all_tables(tables=tables_to_extract)
+            elif hasattr(adapter, 'run_all_tables'):
+                # Google style: run_all_tables() - ignores table filter for now
+                # TODO: Add table filtering to GooglePipeline.run_all_tables
+                dataframes = adapter.run_all_tables(load_to_sink=False)
+                # Filter to requested tables if specified
+                if tables:
+                    dataframes = {k: v for k, v in dataframes.items() if k in tables}
+            else:
+                raise AttributeError(f"Adapter {platform_name} has no method to extract tables")
 
             # Load each table to database
             for table_name, df in dataframes.items():
@@ -317,7 +431,7 @@ class SocialPipeline:
                     loaded_count = self.data_sink.load(
                         df=df,
                         table_name=table_name,
-                        mode="append"  # Use merge/upsert logic in the sink
+                        mode="upsert"  # INSERT new rows + UPDATE existing (default)
                     )
                     logger.info(f"✓ Loaded {loaded_count} rows to {table_name}")
                     row_count = loaded_count

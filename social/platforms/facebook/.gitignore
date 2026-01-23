@@ -1,0 +1,21 @@
+# Token cache (contains sensitive OAuth tokens)
+tokens.json
+facebook_tokens.json
+
+# Downloaded reports and data
+*.csv
+reports/
+data/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+
+# Test outputs
+test_*.csv
+test_data/

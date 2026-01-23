@@ -1,20 +1,18 @@
-"""Social platforms module."""
+"""Social platforms module.
 
-from social.platforms.facebook.ads_client import FBAdsServiceBuilderAccount, FBAdsServiceAccount
-from social.platforms.facebook.processor import FBAdsProcess
-from social.platforms.google.ads_client import GoogleAdsServiceBuilder, GoogleAdsService
-from social.platforms.google.processor import GoogleAdsProcess
-from social.platforms.linkedin.ads_client import LinkedinAdsBuilder, LinkedinAdsService
-from social.platforms.linkedin.processor import LinkedinProcess
+This module contains platform-specific implementations:
+- microsoft: Microsoft Ads (Bing Ads SDK v13)
+- linkedin: LinkedIn Ads (REST API v202601)
+- facebook: Facebook Ads (Graph API SDK v19.0)
+- google: Google Ads (gRPC + Protobuf)
 
-__all__ = [
-    "FBAdsServiceBuilderAccount",
-    "FBAdsServiceAccount",
-    "FBAdsProcess",
-    "GoogleAdsServiceBuilder",
-    "GoogleAdsService",
-    "GoogleAdsProcess",
-    "LinkedinAdsBuilder",
-    "LinkedinAdsService",
-    "LinkedinProcess",
-]
+Each platform is completely independent and self-contained.
+Import from specific platform modules directly:
+
+    from social.platforms.linkedin.pipeline import LinkedInPipeline
+    from social.platforms.facebook.pipeline import FacebookPipeline
+    from social.platforms.google.pipeline import GooglePipeline
+    from social.platforms.microsoft.pipeline import MicrosoftPipeline
+"""
+
+__all__ = []

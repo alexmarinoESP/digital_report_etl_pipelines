@@ -1,0 +1,173 @@
+# Azure Container App Job Configuration
+# Social Ads Unified Orchestrator
+# Runs all 4 platforms: Microsoft, LinkedIn, Facebook, Google
+# Schedule: Daily at midnight UTC
+
+apiVersion: apps/v1
+kind: Job
+metadata:
+  name: social-ads-orchestrator-job
+  namespace: social-ads
+  labels:
+    app: social-ads-orchestrator
+    platform: unified
+    environment: production
+spec:
+  # Cron schedule: Daily at 00:00 UTC
+  schedule: "0 0 * * *"
+
+  # Job settings
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+
+  template:
+    metadata:
+      labels:
+        app: social-ads-orchestrator
+        platform: unified
+    spec:
+      containers:
+      - name: social-ads-orchestrator
+        image: acrdigitalreportsdc.azurecr.io/social-ads-orchestrator:latest
+        imagePullPolicy: Always
+
+        # Environment variables
+        env:
+        # Orchestrator configuration
+        - name: ORCHESTRATOR_CONFIG
+          value: "/app/social/orchestrator/orchestrator_config.yml"
+        - name: LOG_LEVEL
+          value: "INFO"
+        - name: EXPORT_REPORT
+          value: "true"
+        - name: REPORT_FORMAT
+          value: "json"
+
+        # Microsoft Ads credentials
+        - name: MICROSOFT_ADS_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: microsoft-ads-secrets
+              key: client-id
+        - name: MICROSOFT_ADS_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: microsoft-ads-secrets
+              key: client-secret
+        - name: MICROSOFT_ADS_DEVELOPER_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: microsoft-ads-secrets
+              key: developer-token
+        - name: MICROSOFT_ADS_CUSTOMER_ID
+          value: "253486895"
+
+        # LinkedIn Ads credentials
+        - name: LINKEDIN_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: linkedin-ads-secrets
+              key: client-id
+        - name: LINKEDIN_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: linkedin-ads-secrets
+              key: client-secret
+        - name: LINKEDIN_ACCESS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: linkedin-ads-secrets
+              key: access-token
+
+        # Facebook Ads credentials
+        - name: FACEBOOK_APP_ID
+          valueFrom:
+            secretKeyRef:
+              name: facebook-ads-secrets
+              key: app-id
+        - name: FACEBOOK_APP_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: facebook-ads-secrets
+              key: app-secret
+        - name: FACEBOOK_ACCESS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: facebook-ads-secrets
+              key: access-token
+        - name: FB_AD_ACCOUNT_IDS
+          value: "act_123456,act_789012,act_345678"
+
+        # Google Ads credentials (via config file)
+        - name: GOOGLE_MANAGER_CUSTOMER_ID
+          value: "9474097201"
+        - name: GOOGLE_API_VERSION
+          value: "v18"
+        - name: GOOGLE_ADS_CONFIG_FILE
+          value: "/app/social/platforms/google/google-ads-9474097201.yml"
+
+        # Storage configuration
+        - name: STORAGE_TYPE
+          value: "vertica"
+
+        # Vertica credentials
+        - name: VERTICA_HOST
+          value: "vertica11.esprinet.com"
+        - name: VERTICA_PORT
+          value: "5433"
+        - name: VERTICA_DATABASE
+          value: "Esprinet"
+        - name: VERTICA_SCHEMA
+          value: "GoogleAnalytics"
+        - name: VERTICA_USER
+          valueFrom:
+            secretKeyRef:
+              name: vertica-secrets
+              key: username
+        - name: VERTICA_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: vertica-secrets
+              key: password
+
+        # Container App specific
+        - name: CONTAINER_MODE
+          value: "true"
+
+        # Resource limits
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "1000m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+
+        # Volume mounts
+        volumeMounts:
+        - name: google-ads-config
+          mountPath: /app/social/platforms/google
+          readOnly: true
+        - name: reports
+          mountPath: /app/reports
+          readOnly: false
+
+      # Volumes
+      volumes:
+      - name: google-ads-config
+        secret:
+          secretName: google-ads-credentials
+          items:
+          - key: config-9474097201
+            path: google-ads-9474097201.yml
+      - name: reports
+        emptyDir: {}
+
+      # Restart policy
+      restartPolicy: OnFailure
+
+      # Timeout (2 hours for all platforms)
+      activeDeadlineSeconds: 7200
+
+      # Service account
+      serviceAccountName: social-ads-sa

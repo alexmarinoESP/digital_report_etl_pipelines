@@ -25,8 +25,8 @@ REQUEST_TIMEOUT_SECONDS: Final[int] = 30
 RATE_LIMIT_DELAY_SECONDS: Final[int] = 60
 
 # LinkedIn specific constants
-LINKEDIN_API_VERSION: Final[str] = "202509"
-LINKEDIN_MAX_PAGE_SIZE: Final[int] = 1000
+LINKEDIN_API_VERSION: Final[str] = "202509"  # Must match old project version
+LINKEDIN_MAX_PAGE_SIZE: Final[int] = 10000
 LINKEDIN_DEFAULT_TIME_GRANULARITY: Final[str] = "DAILY"
 
 # Google Ads specific constants
@@ -50,7 +50,8 @@ class Platform(Enum):
 
     LINKEDIN = "linkedin"
     GOOGLE = "google"
-    FACEBOOK = "facebook"  # Future support
+    FACEBOOK = "facebook"
+    MICROSOFT = "microsoft"
     TWITTER = "twitter"    # Future support
 
 
@@ -87,6 +88,13 @@ class GoogleAdsTable(Enum):
     AUDIENCE_2 = "google_ads_audience_2"
     AD_REPORT = "google_ads_ad_report"
     VIOLATION_POLICY = "google_ads_violation_policy"
+
+
+class MicrosoftAdsTable(Enum):
+    """Microsoft Ads table definitions."""
+
+    AD_REPORT = "microsoft_ads_report"
+    CAMPAIGN_REPORT = "microsoft_ads_campaign_report"
 
 
 class HTTPMethod(Enum):

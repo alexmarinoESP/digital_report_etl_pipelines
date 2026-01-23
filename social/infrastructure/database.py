@@ -77,7 +77,7 @@ class VerticaDataSink:
         self,
         df: pd.DataFrame,
         table_name: str,
-        mode: str = "append",
+        mode: str = "upsert",
         dedupe_columns: Optional[List[str]] = None,
     ) -> int:
         """Load DataFrame into Vertica table.
@@ -85,11 +85,14 @@ class VerticaDataSink:
         Args:
             df: DataFrame to load
             table_name: Target table name (without _TEST suffix)
-            mode: Load mode - 'append', 'replace', 'upsert'
-            dedupe_columns: Columns to use for deduplication (None = auto-detect)
+            mode: Load mode:
+                - 'append': INSERT only new rows (skip duplicates)
+                - 'replace': TRUNCATE table then INSERT all rows
+                - 'upsert': INSERT new rows + UPDATE existing rows (default)
+            dedupe_columns: Columns to use as Primary Key (None = auto-detect)
 
         Returns:
-            Number of rows loaded
+            Number of rows loaded/updated
 
         Raises:
             DatabaseError: If load operation fails
@@ -109,22 +112,42 @@ class VerticaDataSink:
             df = self._add_missing_columns(df, col_order)
             df = self._align_data_types(cursor, final_table_name, df)
 
+            # STEP 1: Remove duplicates WITHIN the DataFrame itself
+            initial_rows = len(df)
+            df = df.drop_duplicates(keep='first')
+            duplicates_removed = initial_rows - len(df)
+            if duplicates_removed > 0:
+                logger.warning(
+                    f"Removed {duplicates_removed} internal duplicates from DataFrame "
+                    f"before loading to {final_table_name}"
+                )
+
             # Handle different load modes
             if mode == "replace":
+                # REPLACE: Truncate + Insert all
                 self._truncate_table(cursor, final_table_name)
-            elif mode == "append" or mode == "upsert":
-                # Deduplicate against existing data
+                rows_loaded = self._copy_to_db(cursor, final_table_name, df)
+                logger.info(f"✓ Replaced {rows_loaded} rows in {final_table_name}")
+                return rows_loaded
+
+            elif mode == "append":
+                # APPEND: Insert only new rows (skip existing)
                 df = self._deduplicate(cursor, final_table_name, df, dedupe_columns)
+                if df.empty:
+                    logger.info(f"No new rows to append to {final_table_name}")
+                    return 0
+                rows_loaded = self._copy_to_db(cursor, final_table_name, df)
+                logger.info(f"✓ Appended {rows_loaded} new rows to {final_table_name}")
+                return rows_loaded
 
-            if df.empty:
-                logger.info(f"No new rows to load after deduplication for {final_table_name}")
-                return 0
+            elif mode == "upsert":
+                # UPSERT: Insert new + Update existing
+                rows_affected = self._upsert(cursor, final_table_name, df, dedupe_columns)
+                logger.info(f"✓ Upserted {rows_affected} rows to {final_table_name}")
+                return rows_affected
 
-            # Write to database using COPY
-            rows_loaded = self._copy_to_db(cursor, final_table_name, df)
-
-            logger.info(f"✓ Loaded {rows_loaded} rows to {final_table_name}")
-            return rows_loaded
+            else:
+                raise ValueError(f"Invalid mode: {mode}. Must be 'append', 'replace', or 'upsert'")
 
         except Exception as e:
             logger.error(f"Failed to load data to {final_table_name}: {e}")
@@ -336,14 +359,14 @@ class VerticaDataSink:
             cursor: Database cursor
             table_name: Table name
             df: DataFrame to deduplicate
-            dedupe_columns: Columns to use for matching (None = auto-detect)
+            dedupe_columns: Columns to use for matching (None = auto-detect using PK)
 
         Returns:
             DataFrame with only new rows
         """
         if dedupe_columns is None:
-            # Auto-detect dedupe columns (exclude row_loaded_date)
-            dedupe_columns = [col for col in df.columns if col != "row_loaded_date"]
+            # Auto-detect PK columns using same logic as _detect_pk_columns
+            dedupe_columns = self._detect_pk_columns(df)
 
         if not dedupe_columns:
             logger.warning("No deduplication columns found, skipping deduplication")
@@ -385,6 +408,28 @@ class VerticaDataSink:
             # Convert 'nan' strings to actual NaN
             existing_data = existing_data.replace("nan", np.nan, regex=True)
 
+            # CRITICAL: Align data types between new and existing data for merge keys
+            # This prevents type mismatch errors (e.g., Int64 vs str, int64 vs str)
+            for col in dedupe_columns:
+                if col in df.columns and col in existing_data.columns:
+                    # Get dtypes
+                    new_dtype = df[col].dtype
+                    existing_dtype = existing_data[col].dtype
+
+                    # If types differ, convert existing_data to match new df
+                    if new_dtype != existing_dtype:
+                        try:
+                            existing_data[col] = existing_data[col].astype(new_dtype)
+                            logger.debug(f"Converted existing data column '{col}' from {existing_dtype} to {new_dtype} for merge")
+                        except Exception as e:
+                            logger.warning(f"Could not convert column '{col}' type for merge: {e}")
+                            # Try converting new df to existing type instead
+                            try:
+                                df[col] = df[col].astype(existing_dtype)
+                                logger.debug(f"Converted new data column '{col}' from {new_dtype} to {existing_dtype} for merge")
+                            except Exception as e2:
+                                logger.error(f"Type conversion failed for merge key '{col}': {e2}")
+
             # Left anti-join: keep only rows from df NOT in existing_data
             merged = df.merge(
                 existing_data,
@@ -406,6 +451,192 @@ class VerticaDataSink:
         except DatabaseError as e:
             logger.warning(f"Deduplication query failed, proceeding without dedup: {e}")
             return df
+
+    def _upsert(
+        self,
+        cursor,
+        table_name: str,
+        df: pd.DataFrame,
+        pk_columns: Optional[List[str]] = None
+    ) -> int:
+        """Perform UPSERT operation: INSERT new rows + UPDATE existing rows.
+
+        This replicates the old MERGE strategy:
+        1. Create temporary _source table
+        2. INSERT all data into _source table
+        3. MERGE _source into target table:
+           - UPDATE existing rows (matched on PK)
+           - INSERT new rows (not matched)
+        4. Drop _source table
+
+        Args:
+            cursor: Database cursor
+            table_name: Target table name
+            df: DataFrame with data to upsert
+            pk_columns: Primary key columns (None = auto-detect)
+
+        Returns:
+            Total rows affected (inserted + updated)
+        """
+        # Auto-detect PK columns if not provided
+        if pk_columns is None:
+            pk_columns = self._detect_pk_columns(df)
+
+        if not pk_columns:
+            logger.warning(f"No PK columns detected for {table_name}, falling back to append mode")
+            df_new = self._deduplicate(cursor, table_name, df, None)
+            return self._copy_to_db(cursor, table_name, df_new)
+
+        logger.debug(f"UPSERT using PK columns: {pk_columns}")
+
+        # Step 1: Create temporary source table
+        source_table = f"{table_name}_source"
+        try:
+            # Create source table with same schema as target
+            cursor.execute(f"""
+                CREATE TABLE IF NOT EXISTS {self.schema}.{source_table}
+                LIKE {self.schema}.{table_name}
+            """)
+            cursor.execute("COMMIT")
+            logger.debug(f"Created source table: {source_table}")
+
+            # Add last_updated_date column if not exists (for tracking updates)
+            try:
+                cursor.execute(f"""
+                    ALTER TABLE {self.schema}.{source_table}
+                    ADD COLUMN IF NOT EXISTS last_updated_date TIMESTAMP
+                """)
+                cursor.execute(f"""
+                    ALTER TABLE {self.schema}.{table_name}
+                    ADD COLUMN IF NOT EXISTS last_updated_date TIMESTAMP
+                """)
+                cursor.execute("COMMIT")
+            except Exception:
+                pass  # Column might already exist
+
+            # Step 2: Truncate source table and insert new data
+            self._truncate_table(cursor, source_table)
+            rows_in_source = self._copy_to_db(cursor, source_table, df)
+            logger.debug(f"Loaded {rows_in_source} rows into {source_table}")
+
+            # Step 3: Build MERGE query
+            # Identify update columns (all columns except PK and metadata)
+            all_columns = list(df.columns)
+            update_columns = [
+                col for col in all_columns
+                if col not in pk_columns
+                and col not in ["row_loaded_date", "last_updated_date"]
+            ]
+
+            if not update_columns:
+                logger.warning(f"No columns to update for {table_name}, only PK columns found")
+                # If no update columns, just insert new rows
+                df_new = self._deduplicate(cursor, table_name, df, pk_columns)
+                return self._copy_to_db(cursor, table_name, df_new)
+
+            # Build ON clause: TGT.id = SRC.id AND TGT.date = SRC.date
+            on_conditions = " AND ".join([f"TGT.{col} = SRC.{col}" for col in pk_columns])
+
+            # Build SET clause: field1=SRC.field1, field2=SRC.field2, ...
+            set_assignments = ", ".join([f"{col} = SRC.{col}" for col in update_columns])
+            set_assignments += ", last_updated_date = CURRENT_TIMESTAMP"
+
+            # Build MERGE query
+            merge_query = f"""
+                MERGE INTO {self.schema}.{table_name} TGT
+                USING {self.schema}.{source_table} SRC
+                ON {on_conditions}
+                WHEN MATCHED THEN
+                    UPDATE SET {set_assignments}
+                WHEN NOT MATCHED THEN
+                    INSERT ({', '.join(all_columns)})
+                    VALUES ({', '.join([f'SRC.{col}' for col in all_columns])})
+            """
+
+            # Execute MERGE
+            logger.debug(f"Executing MERGE query for {table_name}")
+            cursor.execute(merge_query)
+            cursor.execute("COMMIT")
+
+            # Get count of rows in source (this is our "rows affected")
+            # Note: Vertica doesn't return affected rows from MERGE, so we approximate
+            rows_affected = rows_in_source
+
+            logger.info(
+                f"MERGE completed: {source_table} → {table_name} "
+                f"(PK: {pk_columns}, {rows_affected} rows processed)"
+            )
+
+            return rows_affected
+
+        except Exception as e:
+            logger.error(f"UPSERT failed for {table_name}: {e}")
+            raise SocialDatabaseError(
+                f"UPSERT operation failed for {table_name}",
+                details={"error": str(e), "pk_columns": pk_columns}
+            )
+
+        finally:
+            # Clean up: we don't drop the source table to allow inspection if needed
+            pass
+
+    def _detect_pk_columns(self, df: pd.DataFrame) -> List[str]:
+        """Auto-detect Primary Key columns from DataFrame.
+
+        Detection logic:
+        - If 'id' column exists → use 'id' alone
+        - If 'date' column exists:
+            - With 'creative_id' → use (creative_id, date)
+            - With 'ad_id' → use (ad_id, date)
+            - With 'adgroup_id' → use (adgroup_id, date)
+            - With 'campaign_id' → use (campaign_id, date)
+        - If 'device' column exists with ad_id → use (ad_id, device)
+        - Otherwise → use all non-metadata columns
+
+        Args:
+            df: DataFrame to analyze
+
+        Returns:
+            List of PK column names
+        """
+        pk_candidates = []
+
+        # Rule 1: Simple 'id' primary key (campaigns, accounts, creatives)
+        if "id" in df.columns:
+            pk_candidates.append("id")
+            logger.debug("Detected PK: 'id' (single column)")
+            return pk_candidates
+
+        # Rule 2: Time-series data with date column
+        if "date" in df.columns:
+            # Priority order for composite keys
+            for id_col in ["creative_id", "ad_id", "adgroup_id", "campaign_id"]:
+                if id_col in df.columns:
+                    pk_candidates.append(id_col)
+                    pk_candidates.append("date")
+                    logger.debug(f"Detected PK: ({id_col}, date) - time-series data")
+                    return pk_candidates
+
+        # Rule 3: Device-level aggregation (Google Ads cost_by_device)
+        if "ad_id" in df.columns and "device" in df.columns:
+            pk_candidates.extend(["ad_id", "device"])
+            logger.debug("Detected PK: (ad_id, device) - device aggregation")
+            return pk_candidates
+
+        # Rule 4: Composite keys without date
+        if "campaign_id" in df.columns and "adgroup_id" in df.columns and "ad_id" in df.columns:
+            pk_candidates.extend(["campaign_id", "adgroup_id", "ad_id"])
+            logger.debug("Detected PK: (campaign_id, adgroup_id, ad_id) - composite key")
+            return pk_candidates
+
+        # Fallback: use all columns except metadata
+        pk_candidates = [
+            col for col in df.columns
+            if col not in ["row_loaded_date", "last_updated_date"]
+        ]
+        logger.warning(f"No standard PK detected, using all {len(pk_candidates)} columns")
+
+        return pk_candidates
 
     def _copy_to_db(self, cursor, table_name: str, df: pd.DataFrame) -> int:
         """Write DataFrame to database using COPY command.

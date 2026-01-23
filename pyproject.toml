@@ -28,6 +28,10 @@ dependencies = [
     "minio>=7.2.20",
 ]
 
+[project.scripts]
+social-pipeline = "social.run_pipeline:main"
+social-test = "social.test_pipeline:main"
+
 [project.optional-dependencies]
 # Dipendenze specifiche per newsletter
 newsletter = [
@@ -44,6 +48,7 @@ newsletter = [
 social = [
     "facebook-business>=19.0.0",
     "google-ads>=27.0.0,<28.0.0",
+    "bingads>=13.0.26",
     "psycopg2-binary>=2.9.0",
     "proto-plus>=1.22.0",
     "protobuf>=4.21.0",

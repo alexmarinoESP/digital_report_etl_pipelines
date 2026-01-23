@@ -1,6 +1,6 @@
 platform:
   api_base_url: "https://graph.facebook.com"
-  api_version: "v18.0"
+  api_version: "v19.0"
 
 fb_ads_audience_adset:
   type: get_ad_sets

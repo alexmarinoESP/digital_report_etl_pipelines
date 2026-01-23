@@ -245,7 +245,7 @@ class ConfigurationManager:
         if platform:
             platforms_to_load = [platform]
         else:
-            platforms_to_load = ["linkedin", "google", "facebook"]
+            platforms_to_load = ["linkedin", "google", "facebook", "microsoft"]
 
         for platform_name in platforms_to_load:
             try:
@@ -330,8 +330,29 @@ class ConfigurationManager:
             else:
                 exclude_keys.append("request")  # Other platforms don't use request field
 
-            # Parse processing steps - keep as-is for adapter to handle
-            processing_steps = table_data.get("processing", {})
+            # Parse processing steps
+            # Handle both list format (LinkedIn) and dict format (Google legacy)
+            processing_config = table_data.get("processing", [])
+            if isinstance(processing_config, dict):
+                # Convert dict to list of dicts format
+                # Format: {step_name: {params...}} → [{"name": step_name, **params}]
+                processing_steps = []
+                for step_name, step_params in processing_config.items():
+                    if step_params and isinstance(step_params, dict) and step_params.get("params") != "None":
+                        # Has actual parameters (filter out 'params' key)
+                        params = {k: v for k, v in step_params.items() if k != "params"}
+                        if params:
+                            # Add step with parameters as dict
+                            processing_steps.append({"name": step_name, **params})
+                        else:
+                            # No real parameters, just step name
+                            processing_steps.append(step_name)
+                    else:
+                        # No parameters or params: None
+                        processing_steps.append(step_name)
+            else:
+                # Already in list format
+                processing_steps = processing_config
 
             # Determine HTTP request type
             # LinkedIn: always GET (type field is for endpoint resolution)

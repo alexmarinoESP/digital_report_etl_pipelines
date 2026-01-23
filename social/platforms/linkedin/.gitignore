@@ -1,0 +1,21 @@
+# Token cache (sensitive OAuth tokens)
+tokens.json
+linkedin_tokens.json
+
+# Downloaded data
+*.csv
+reports/
+data/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+
+# Test outputs
+test_*.csv
+test_data/

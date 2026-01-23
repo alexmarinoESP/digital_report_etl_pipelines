@@ -1,0 +1,19 @@
+# Token cache (contains sensitive OAuth tokens)
+tokens.json
+
+# Downloaded reports
+*.csv
+reports/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+
+# Test outputs
+test_*.csv
+test_reports/

@@ -1,6 +1,6 @@
 platform:
   api_base_url: "https://api.linkedin.com/rest"
-  api_version: "202509"
+  api_version: "202509"  # Must match old project version
 
 linkedin_ads_creative:
   request: get_creatives
@@ -10,14 +10,13 @@ linkedin_ads_creative:
   #fields: ['id', 'campaign_id', 'name', 'intendedStatus', 'type', 'lastModifiedAt', 'createdAt', 'account']
   processing:
     extract_id_from_urn:
-      cols: [id, campaign, account]
+      columns: [id, campaign, account]  # MUST use 'columns' not 'cols'
     rename_column:
       renaming:
         status: status_0
         campaign: campaign_id
         intendedStatus: status
-    add_row_loaded_date:
-      params: None
+    add_row_loaded_date: None  # None or params: None in old code
   query:
     column_name:
       - id
@@ -35,7 +34,7 @@ linkedin_ads_creative:
 linkedin_ads_campaign:
   request: get_campaigns
   q: search
-  pageSize: '1000'
+  pageSize: '10000'  # Changed from 1000 to 10000 (old working value)
   type: CAMPAIGN
   pagination: True
   nested_element: ['totalBudget', 'dailyBudget', 'unitCost']
@@ -47,18 +46,19 @@ linkedin_ads_campaign:
     response_decoration:
       field: account
       new_col_name: null
+    convert_int:
+      columns: ['id']
     convert_unix_timestamp_to_date:
       columns: ['start', 'end']
     rename_column:
       renaming:
         start: start_date
         end: end_date
-    add_row_loaded_date:
-      params: None
+    add_row_loaded_date: None  # None or params: None in old code
     convert_nat_to_nan:
       columns: ['end_date','start_date']
     modify_name:
-      cols: ['name']
+      columns: ['name']  # MUST use 'columns' not 'cols'
   update:
     fields_id:
       - id
@@ -86,8 +86,7 @@ linkedin_ads_insights:
     response_decoration:
       field: pivotValues
       new_col_name: creative_id
-    add_row_loaded_date:
-      params: None
+    add_row_loaded_date: None  # None or params: None in old code
   merge:
     table_name_source: linkedin_ads_insights_source
     fields_id:
@@ -112,7 +111,7 @@ linkedin_ads_insights:
 
 linkedin_ads_campaign_audience:
   q: search
-  pageSize: '1000'
+  pageSize: '10000'  # Changed from 1000 to 10000 (old working value)
   type: CAMPAIGN
   request: get_campaigns
   #fields: ['targetingCriteria','id']
@@ -123,8 +122,7 @@ linkedin_ads_campaign_audience:
     convert_string:
       columns:
       - id
-    add_row_loaded_date:
-      params: None
+    add_row_loaded_date: None  # None or params: None in old code
   update:
     fields_id:
       - id
@@ -142,8 +140,7 @@ linkedin_ads_account:
   processing:
     add_company:
       params: None
-    add_row_loaded_date:
-      params: None
+    add_row_loaded_date: None  # None or params: None in old code
   update:
     fields_id:
       - id
@@ -166,8 +163,7 @@ linkedin_ads_audience:
   processing:
     modify_urn_li_sponsoredAccount:
       params: None
-    add_row_loaded_date:
-      params: None
+    add_row_loaded_date: None  # None or params: None in old code
 #
 #
 

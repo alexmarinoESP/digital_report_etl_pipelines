@@ -1,0 +1,181 @@
+# Microsoft Ads Platform Configuration
+# Configuration for Microsoft Advertising (formerly Bing Ads) ETL pipeline
+
+platform:
+  api_base_url: "https://bingads.microsoft.com"  # BingAds SDK base (not REST)
+  api_version: "13"  # BingAds API version
+
+# Credentials (use environment variables in production)
+# Required environment variables:
+# - MICROSOFT_ADS_CLIENT_ID
+# - MICROSOFT_ADS_CLIENT_SECRET
+# - MICROSOFT_ADS_DEVELOPER_TOKEN
+# - MICROSOFT_ADS_CUSTOMER_ID
+# - MICROSOFT_ADS_ACCOUNT_ID
+# - AZURE_TENANT_ID (for service principal auth)
+
+# Storage Configuration
+# Set STORAGE_TYPE environment variable to:
+# - "vertica" for Vertica database
+# - "azure_table" for Azure Table Storage
+storage:
+  schema: "GoogleAnalytics"  # Vertica schema name
+  default_load_mode: "append"  # append, replace, or upsert
+
+# Table Definitions
+# Microsoft Ads has two main report types: Ad Performance and Campaign Performance
+
+# Ad Performance Report (detailed ad-level metrics)
+microsoft_ads_report:
+  # Report configuration
+  report_name: "Ad"  # BingAds report type: "Ad" or "Campaign"
+  time_period: "LastSixMonths"  # PredefinedTime: Yesterday, LastSevenDays, LastSixMonths, etc.
+  aggregation: "Summary"  # Summary, Daily, Weekly, Monthly, Yearly
+  header_identifier: "Conversions"  # Column name to identify header row in CSV
+
+  # Fields to include in the report
+  # Note: TimePeriod is automatically excluded when aggregation=Summary
+  fields:
+    - AdId
+    - CustomerId
+    - CustomerName
+    - AccountId
+    - AccountName
+    - CampaignId
+    - CampaignName
+    - Clicks
+    - Conversions
+    - Impressions
+    - Spend
+    - AverageCpc
+    - AverageCpm
+    - Ctr
+
+  # Processing steps (applied in order)
+  processing:
+    - convert_id_types  # Convert ID columns to strings
+    - add_row_loaded_date  # Add row_loaded_date column
+    - add_ingestion_timestamp  # Add IngestionTimestamp column
+
+  # Database configuration
+  schema: "GoogleAnalytics"
+  load_mode: "replace"  # replace the table each time
+
+  # Query configuration (for identifying records)
+  query:
+    column_name:
+      - AdId
+      - CampaignId
+      - AccountId
+
+# Campaign Performance Report (campaign-level aggregated metrics)
+microsoft_ads_campaign_report:
+  # Report configuration
+  report_name: "Campaign"
+  time_period: "LastSixMonths"
+  aggregation: "Summary"
+  header_identifier: "Conversions"
+
+  # Fields to include
+  fields:
+    - CustomerId
+    - CustomerName
+    - AccountId
+    - AccountName
+    - CampaignId
+    - CampaignName
+    - Clicks
+    - Conversions
+    - Impressions
+    - Spend
+    - AverageCpc
+    - AverageCpm
+    - Ctr
+
+  # Processing steps
+  processing:
+    - convert_id_types
+    - add_row_loaded_date
+    - add_ingestion_timestamp
+
+  # Database configuration
+  schema: "GoogleAnalytics"
+  load_mode: "replace"
+
+  # Query configuration
+  query:
+    column_name:
+      - CampaignId
+      - AccountId
+
+# Optional: Daily Ad Performance Report
+# Uncomment to enable daily granularity reporting
+#microsoft_ads_report_daily:
+#  report_name: "Ad"
+#  time_period: "LastSevenDays"
+#  aggregation: "Daily"
+#  header_identifier: "TimePeriod"  # Note: TimePeriod is included with Daily aggregation
+#
+#  fields:
+#    - AdId
+#    - CustomerId
+#    - CustomerName
+#    - AccountId
+#    - AccountName
+#    - TimePeriod
+#    - CampaignId
+#    - CampaignName
+#    - Clicks
+#    - Conversions
+#    - Impressions
+#    - Spend
+#    - AverageCpc
+#    - AverageCpm
+#    - Ctr
+#
+#  processing:
+#    - convert_id_types
+#    - add_row_loaded_date
+#    - add_ingestion_timestamp
+#
+#  schema: "GoogleAnalytics"
+#  load_mode: "append"
+#
+#  query:
+#    column_name:
+#      - AdId
+#      - CampaignId
+#      - TimePeriod
+
+# Notes on Microsoft Ads API:
+# 1. BingAds SDK uses SOAP/XML, not REST (unlike LinkedIn/Facebook)
+# 2. Reports are generated asynchronously and downloaded as CSV
+# 3. CSV files contain metadata headers/footers that must be cleaned
+# 4. TimePeriod column conflicts with Summary aggregation (must be removed)
+# 5. Large integer IDs must be converted to strings to prevent precision loss
+# 6. API supports custom date ranges via CustomDateRangeStart/End (not shown here)
+#
+# Available Report Types:
+# - Ad Performance: Ad-level metrics (most detailed)
+# - Campaign Performance: Campaign-level aggregated metrics
+# - AdGroup Performance: AdGroup-level metrics
+# - Account Performance: Account-level metrics
+# - Keyword Performance: Keyword-level metrics (search campaigns)
+#
+# Available Aggregation Levels:
+# - Summary: Single row with totals (no time dimension)
+# - Daily: One row per day
+# - Weekly: One row per week
+# - Monthly: One row per month
+# - Yearly: One row per year
+# - HourOfDay: Aggregated by hour (0-23)
+# - DayOfWeek: Aggregated by day of week
+#
+# Available Time Periods:
+# - Today, Yesterday
+# - LastSevenDays, LastThirtyDays, LastSixMonths
+# - ThisWeek, LastWeek, ThisMonth, LastMonth, ThisYear, LastYear
+# - Custom: Use CustomDateRangeStart and CustomDateRangeEnd
+#
+# For complete field lists, see:
+# https://docs.microsoft.com/en-us/advertising/reporting-service/adperformancereportrequest

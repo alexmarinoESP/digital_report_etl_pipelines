@@ -135,7 +135,13 @@ def test_adapters_initialization(pipeline: SocialPipeline):
 
         # Test each adapter
         for platform_name, adapter in pipeline.adapters.items():
-            tables = adapter.get_all_tables()
+            # Handle different method names across platforms
+            if hasattr(adapter, 'get_all_tables'):
+                tables = adapter.get_all_tables()
+            elif hasattr(adapter, 'get_table_names'):
+                tables = adapter.get_table_names()
+            else:
+                tables = []
             print(f"  {platform_name}: {len(tables)} tables configured")
 
         return True
@@ -245,7 +251,7 @@ def parse_arguments():
     parser.add_argument(
         "--platform",
         type=str,
-        choices=["linkedin", "google", "facebook", "all"],
+        choices=["linkedin", "google", "facebook", "microsoft", "all"],
         default="linkedin",
         help="Platform to test (default: linkedin)",
     )
