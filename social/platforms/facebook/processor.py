@@ -26,6 +26,7 @@ import pandas as pd
 from loguru import logger
 
 from social.platforms.facebook.constants import COMPANY_ACCOUNT_MAP
+from social.utils.aggregation import aggregate_metrics_by_entity
 
 
 class FacebookProcessor:
@@ -489,6 +490,8 @@ class FacebookProcessor:
         """
         if self.df.empty or actions_column not in self.df.columns:
             logger.warning(f"Column '{actions_column}' not found in DataFrame")
+            # Create empty DataFrame with expected schema for fb_ads_insight_actions
+            self.df = pd.DataFrame(columns=['ad_id', 'action_type', 'action_target_id', 'value'])
             return self
 
         logger.info("Converting actions to long format DataFrame")
@@ -700,3 +703,34 @@ class FacebookProcessor:
             company_id = COMPANY_ACCOUNT_MAP.get(clean_id, 1)
 
         return company_id
+
+    def aggregate_by_entity(
+        self,
+        group_columns: List[str] = None,
+        metric_columns: List[str] = None,
+        agg_method: str = 'sum',
+    ) -> "FacebookProcessor":
+        """Aggregate metrics by entity (remove date granularity).
+
+        Transforms time-series data into cumulative metrics using shared utility function.
+
+        Args:
+            group_columns: Columns to group by (default: auto-detect)
+            metric_columns: Columns to aggregate (default: all numeric)
+            agg_method: Aggregation method (default: 'sum')
+
+        Returns:
+            Self for chaining
+        """
+        if self.df.empty:
+            return self
+
+        self.df = aggregate_metrics_by_entity(
+            df=self.df,
+            group_columns=group_columns,
+            metric_columns=metric_columns,
+            agg_method=agg_method,
+            entity_id_columns=['ad_id', 'adset_id', 'campaign_id', 'account_id']
+        )
+
+        return self

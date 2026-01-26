@@ -159,9 +159,10 @@ class GoogleHTTPClient:
                         query=query,
                     )
 
-                    # Extract customer_client objects
+                    # Extract customer_client objects and add manager_id
                     for row in response:
                         customer_dict = MessageToDict(row.customer_client._pb)
+                        customer_dict["managerId"] = seed_id  # Track which seed/manager this came from
                         all_customers.append(customer_dict)
 
                     # Find manager accounts and get their child accounts
@@ -186,6 +187,7 @@ class GoogleHTTPClient:
                                     # Only add non-manager accounts (actual customer accounts)
                                     if not manager_row.customer_client.manager:
                                         customer_dict = MessageToDict(manager_row.customer_client._pb)
+                                        customer_dict["managerId"] = manager_id  # Track the direct manager
                                         all_customers.append(customer_dict)
 
                             except Exception as e:

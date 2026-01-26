@@ -79,6 +79,7 @@ class VerticaDataSink:
         table_name: str,
         mode: str = "upsert",
         dedupe_columns: Optional[List[str]] = None,
+        increment_columns: Optional[List[str]] = None,
     ) -> int:
         """Load DataFrame into Vertica table.
 
@@ -89,7 +90,9 @@ class VerticaDataSink:
                 - 'append': INSERT only new rows (skip duplicates)
                 - 'replace': TRUNCATE table then INSERT all rows
                 - 'upsert': INSERT new rows + UPDATE existing rows (default)
+                - 'increment': INSERT new rows + INCREMENT metrics for existing rows
             dedupe_columns: Columns to use as Primary Key (None = auto-detect)
+            increment_columns: Columns to increment (only for mode='increment')
 
         Returns:
             Number of rows loaded/updated
@@ -114,13 +117,23 @@ class VerticaDataSink:
 
             # STEP 1: Remove duplicates WITHIN the DataFrame itself
             initial_rows = len(df)
-            df = df.drop_duplicates(keep='first')
-            duplicates_removed = initial_rows - len(df)
-            if duplicates_removed > 0:
-                logger.warning(
-                    f"Removed {duplicates_removed} internal duplicates from DataFrame "
-                    f"before loading to {final_table_name}"
-                )
+            # For UPSERT/INCREMENT, deduplicate on PK columns; otherwise all columns
+            if mode in ["upsert", "increment"] and dedupe_columns:
+                df = df.drop_duplicates(subset=dedupe_columns, keep='last')
+                duplicates_removed = initial_rows - len(df)
+                if duplicates_removed > 0:
+                    logger.warning(
+                        f"Removed {duplicates_removed} duplicate rows (by PK {dedupe_columns}) "
+                        f"from DataFrame before loading to {final_table_name}, kept last occurrence"
+                    )
+            else:
+                df = df.drop_duplicates(keep='first')
+                duplicates_removed = initial_rows - len(df)
+                if duplicates_removed > 0:
+                    logger.warning(
+                        f"Removed {duplicates_removed} internal duplicates from DataFrame "
+                        f"before loading to {final_table_name}"
+                    )
 
             # Handle different load modes
             if mode == "replace":
@@ -146,8 +159,16 @@ class VerticaDataSink:
                 logger.info(f"✓ Upserted {rows_affected} rows to {final_table_name}")
                 return rows_affected
 
+            elif mode == "increment":
+                # INCREMENT: Insert new + Increment metrics for existing
+                if increment_columns is None:
+                    raise ValueError("increment_columns required for mode='increment'")
+                rows_affected = self._increment(cursor, final_table_name, df, dedupe_columns, increment_columns)
+                logger.info(f"✓ Incremented {rows_affected} rows in {final_table_name}")
+                return rows_affected
+
             else:
-                raise ValueError(f"Invalid mode: {mode}. Must be 'append', 'replace', or 'upsert'")
+                raise ValueError(f"Invalid mode: {mode}. Must be 'append', 'replace', 'upsert', or 'increment'")
 
         except Exception as e:
             logger.error(f"Failed to load data to {final_table_name}: {e}")
@@ -500,19 +521,7 @@ class VerticaDataSink:
             cursor.execute("COMMIT")
             logger.debug(f"Created source table: {source_table}")
 
-            # Add last_updated_date column if not exists (for tracking updates)
-            try:
-                cursor.execute(f"""
-                    ALTER TABLE {self.schema}.{source_table}
-                    ADD COLUMN IF NOT EXISTS last_updated_date TIMESTAMP
-                """)
-                cursor.execute(f"""
-                    ALTER TABLE {self.schema}.{table_name}
-                    ADD COLUMN IF NOT EXISTS last_updated_date TIMESTAMP
-                """)
-                cursor.execute("COMMIT")
-            except Exception:
-                pass  # Column might already exist
+            # Note: last_updated_date column removed - using load_date instead
 
             # Step 2: Truncate source table and insert new data
             self._truncate_table(cursor, source_table)
@@ -538,8 +547,8 @@ class VerticaDataSink:
             on_conditions = " AND ".join([f"TGT.{col} = SRC.{col}" for col in pk_columns])
 
             # Build SET clause: field1=SRC.field1, field2=SRC.field2, ...
+            # Note: load_date is updated automatically when row changes
             set_assignments = ", ".join([f"{col} = SRC.{col}" for col in update_columns])
-            set_assignments += ", last_updated_date = CURRENT_TIMESTAMP"
 
             # Build MERGE query
             merge_query = f"""
@@ -580,21 +589,26 @@ class VerticaDataSink:
             # Clean up: we don't drop the source table to allow inspection if needed
             pass
 
-    def _detect_pk_columns(self, df: pd.DataFrame) -> List[str]:
+    def _detect_pk_columns(self, df: pd.DataFrame, exclude_date: bool = False) -> List[str]:
         """Auto-detect Primary Key columns from DataFrame.
 
         Detection logic:
         - If 'id' column exists → use 'id' alone
-        - If 'date' column exists:
+        - If 'date' column exists (and not excluded):
             - With 'creative_id' → use (creative_id, date)
             - With 'ad_id' → use (ad_id, date)
             - With 'adgroup_id' → use (adgroup_id, date)
             - With 'campaign_id' → use (campaign_id, date)
+        - If exclude_date=True (for increment mode):
+            - With 'creative_id' → use (creative_id) only
+            - With 'ad_id' → use (ad_id) only
+            - etc.
         - If 'device' column exists with ad_id → use (ad_id, device)
         - Otherwise → use all non-metadata columns
 
         Args:
             df: DataFrame to analyze
+            exclude_date: If True, exclude 'date' from PK (for increment mode)
 
         Returns:
             List of PK column names
@@ -607,14 +621,17 @@ class VerticaDataSink:
             logger.debug("Detected PK: 'id' (single column)")
             return pk_candidates
 
-        # Rule 2: Time-series data with date column
-        if "date" in df.columns:
+        # Rule 2: Time-series data with date column (or aggregated if exclude_date)
+        if "date" in df.columns or exclude_date:
             # Priority order for composite keys
             for id_col in ["creative_id", "ad_id", "adgroup_id", "campaign_id"]:
                 if id_col in df.columns:
                     pk_candidates.append(id_col)
-                    pk_candidates.append("date")
-                    logger.debug(f"Detected PK: ({id_col}, date) - time-series data")
+                    if "date" in df.columns and not exclude_date:
+                        pk_candidates.append("date")
+                        logger.debug(f"Detected PK: ({id_col}, date) - time-series data")
+                    else:
+                        logger.debug(f"Detected PK: ({id_col}) - aggregated data (no date)")
                     return pk_candidates
 
         # Rule 3: Device-level aggregation (Google Ads cost_by_device)
@@ -708,3 +725,191 @@ class VerticaDataSink:
         cursor.execute(query)
         cursor.execute("COMMIT")
         logger.info(f"Truncated table: {table_name}")
+
+    def _increment(
+        self,
+        cursor,
+        table_name: str,
+        df: pd.DataFrame,
+        pk_columns: Optional[List[str]] = None,
+        increment_columns: List[str] = None,
+    ) -> int:
+        """Perform INCREMENT operation: INSERT new rows + INCREMENT metrics for existing.
+
+        This implements cumulative metric aggregation:
+        - New entities (creative_id, ad_id, etc.) → INSERT with full data
+        - Existing entities → UPDATE by ADDING new metrics to existing values
+
+        Example:
+            DB before:  creative_id=123 → impressions=1000, clicks=50
+            New data:   creative_id=123 → impressions=200,  clicks=10
+            DB after:   creative_id=123 → impressions=1200, clicks=60 ✅
+
+        Args:
+            cursor: Database cursor
+            table_name: Target table name
+            df: DataFrame with NEW metric values to ADD
+            pk_columns: Primary key columns (None = auto-detect)
+            increment_columns: Metric columns to increment (e.g., impressions, clicks)
+
+        Returns:
+            Total rows affected (inserted + updated)
+
+        Raises:
+            SocialDatabaseError: If increment operation fails
+        """
+        # Auto-detect PK columns if not provided (exclude 'date' for aggregated metrics)
+        if pk_columns is None:
+            pk_columns = self._detect_pk_columns(df, exclude_date=True)
+
+        if not pk_columns:
+            logger.warning(f"No PK columns detected for {table_name}, falling back to append mode")
+            df_new = self._deduplicate(cursor, table_name, df, None)
+            return self._copy_to_db(cursor, table_name, df_new)
+
+        logger.debug(f"INCREMENT using PK columns: {pk_columns}, increment columns: {increment_columns}")
+
+        try:
+            # Step 1: Query existing keys from database
+            existing_keys = self._query_existing_keys(cursor, table_name, df, pk_columns)
+
+            # Step 2: Separate new rows from existing rows
+            df_copy = df.copy()
+            df_copy['_merge_key'] = df_copy[pk_columns].apply(lambda row: tuple(row), axis=1)
+            df_copy['_is_new'] = ~df_copy['_merge_key'].isin(existing_keys)
+
+            new_rows = df_copy[df_copy['_is_new']].drop(columns=['_merge_key', '_is_new'])
+            update_rows = df_copy[~df_copy['_is_new']].drop(columns=['_merge_key', '_is_new'])
+
+            rows_affected = 0
+
+            # Step 3: INSERT new rows (with all columns)
+            if not new_rows.empty:
+                rows_affected += self._copy_to_db(cursor, table_name, new_rows)
+                logger.info(f"✓ Inserted {len(new_rows)} new rows")
+
+            # Step 4: INCREMENT metrics for existing rows
+            if not update_rows.empty:
+                rows_affected += self._batch_increment_metrics(
+                    cursor, table_name, update_rows, pk_columns, increment_columns
+                )
+                logger.info(f"✓ Incremented {len(update_rows)} existing rows")
+
+            return rows_affected
+
+        except Exception as e:
+            logger.error(f"INCREMENT failed for {table_name}: {e}")
+            raise SocialDatabaseError(
+                f"INCREMENT operation failed for {table_name}",
+                details={"error": str(e), "pk_columns": pk_columns, "increment_columns": increment_columns}
+            )
+
+    def _query_existing_keys(
+        self,
+        cursor,
+        table_name: str,
+        df: pd.DataFrame,
+        pk_columns: List[str],
+    ) -> set:
+        """Query existing primary keys from database for efficient lookup.
+
+        Args:
+            cursor: Database cursor
+            table_name: Table name
+            df: DataFrame with new data
+            pk_columns: Primary key columns
+
+        Returns:
+            Set of tuples representing existing keys
+        """
+        # Build query to get existing keys
+        columns_str = ", ".join(pk_columns)
+
+        # Add WHERE filter for performance (if date column exists)
+        where_clauses = []
+        if "date" in df.columns:
+            min_date = df["date"].min()
+            max_date = df["date"].max()
+            where_clauses.append(f"date BETWEEN '{min_date}' AND '{max_date}'")
+
+        where_clause = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+        query = f"""
+            SELECT {columns_str}
+            FROM {self.schema}.{table_name}
+            {where_clause}
+        """
+
+        try:
+            cursor.execute(query)
+            existing_data = cursor.fetchall()
+
+            # Convert to set of tuples for fast lookup
+            if len(pk_columns) == 1:
+                # Single column PK
+                return set(row[0] for row in existing_data)
+            else:
+                # Multi-column PK
+                return set(tuple(row) for row in existing_data)
+
+        except Exception as e:
+            logger.warning(f"Failed to query existing keys: {e}, assuming no existing data")
+            return set()
+
+    def _batch_increment_metrics(
+        self,
+        cursor,
+        table_name: str,
+        df: pd.DataFrame,
+        pk_columns: List[str],
+        increment_columns: List[str],
+    ) -> int:
+        """Batch UPDATE using incremental addition (metric = metric + new_value).
+
+        Args:
+            cursor: Database cursor
+            table_name: Table name
+            df: DataFrame with rows to increment
+            pk_columns: Primary key columns
+            increment_columns: Metric columns to increment
+
+        Returns:
+            Number of rows updated
+        """
+        # Build UPDATE query with incremental SET clauses
+        set_clauses = [f"{col} = {col} + %s" for col in increment_columns]
+        set_clause = ", ".join(set_clauses)
+        # Note: load_date is updated in the DataFrame before increment operation
+
+        where_clauses = [f"{col} = %s" for col in pk_columns]
+        where_clause = " AND ".join(where_clauses)
+
+        query = f"""
+            UPDATE {self.schema}.{table_name}
+            SET {set_clause}
+            WHERE {where_clause}
+        """
+
+        # Prepare batch data: (increment_values..., pk_values...)
+        batch_data = []
+        for _, row in df.iterrows():
+            # First: values to increment
+            values = [row[col] for col in increment_columns]
+            # Then: PK values for WHERE clause
+            values.extend([row[col] for col in pk_columns])
+            batch_data.append(tuple(values))
+
+        # Execute batch UPDATE
+        try:
+            cursor.executemany(query, batch_data)
+            cursor.execute("COMMIT")
+            logger.debug(f"Batch incremented {len(batch_data)} rows")
+            return len(batch_data)
+
+        except Exception as e:
+            logger.error(f"Batch increment failed: {e}")
+            raise SocialDatabaseError(
+                "Batch increment failed",
+                query=query[:500],
+                details={"error": str(e), "rows": len(batch_data)}
+            )

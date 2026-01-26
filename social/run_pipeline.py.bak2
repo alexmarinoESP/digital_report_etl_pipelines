@@ -423,26 +423,12 @@ class SocialPipeline:
                 if self.config.dry_run:
                     logger.info(f"[DRY RUN] Would load {row_count} rows to {table_name}")
                 else:
-                    # Determine load mode from table config
-                    table_config = adapter.config.get(table_name, {})
-                    load_mode = self._determine_load_mode(table_config, table_name)
-
-                    logger.info(f"Loading {row_count} rows to {table_name} (mode={load_mode})...")
-
-                    # Prepare load parameters
-                    load_params = {"df": df, "table_name": table_name, "mode": load_mode}
-                    if load_mode == "increment":
-                        inc_cfg = table_config.get("increment", {})
-                        load_params["dedupe_columns"] = inc_cfg.get("pk_columns")
-                        load_params["increment_columns"] = inc_cfg.get("increment_columns")
-                    elif load_mode == "upsert":
-                        # Support both new (upsert) and legacy (merge/update) config formats
-                        ups_cfg = table_config.get("upsert") or table_config.get("merge") or table_config.get("update") or {}
-                        # Legacy format uses 'fields_id', new format uses 'pk_columns'
-                        pk_cols = ups_cfg.get("pk_columns") or ups_cfg.get("fields_id")
-                        load_params["dedupe_columns"] = pk_cols
-
-                    loaded_count = self.data_sink.load(**load_params)
+                    logger.info(f"Loading {row_count} rows to {table_name}...")
+                    loaded_count = self.data_sink.load(
+                        df=df,
+                        table_name=table_name,
+                        mode="upsert"  # INSERT new rows + UPDATE existing (default)
+                    )
                     logger.info(f"✓ Loaded {loaded_count} rows to {table_name}")
                     row_count = loaded_count
 
@@ -453,40 +439,6 @@ class SocialPipeline:
             raise
 
         return results
-
-# Helper method to add after _run_platform, before cleanup
-
-    def _determine_load_mode(self, table_config: Dict[str, Any], table_name: str) -> str:
-        """Determine load mode from table configuration.
-
-        Args:
-            table_config: Table configuration dictionary
-            table_name: Table name (for logging)
-
-        Returns:
-            Load mode: 'replace', 'increment', 'upsert', or 'append'
-        """
-        if table_config.get("increment"):
-            logger.debug(f"Using INCREMENT mode for {table_name}")
-            return "increment"
-
-        elif table_config.get("upsert"):
-            logger.debug(f"Using UPSERT mode for {table_name}")
-            return "upsert"
-
-        elif table_config.get("replace") or table_config.get("truncate", False):
-            logger.warning(f"✓ Using REPLACE mode for {table_name} (truncate={table_config.get('truncate')}, replace={table_config.get('replace')})")
-            return "replace"
-
-        elif table_config.get("update") or table_config.get("merge"):
-            # Legacy configs: map to upsert
-            logger.debug(f"Using UPSERT mode for {table_name} (legacy config)")
-            return "upsert"
-
-        else:
-            # Default: APPEND (insert only new rows, skip duplicates)
-            logger.debug(f"Using APPEND mode for {table_name} (default)")
-            return "append"
 
     def cleanup(self) -> None:
         """Clean up resources (close connections, etc.)."""

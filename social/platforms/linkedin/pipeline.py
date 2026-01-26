@@ -32,6 +32,7 @@ from social.core.protocols import DataSink, TokenProvider
 from social.platforms.linkedin.adapter import LinkedInAdapter
 from social.platforms.linkedin.constants import COMPANY_ACCOUNT_MAP, INSIGHTS_LOOKBACK_DAYS
 from social.platforms.linkedin.processor import LinkedInProcessor
+from social.utils.commons import handle_nested_response, extract_targeting_criteria
 
 
 class LinkedInPipeline:
@@ -285,10 +286,17 @@ class LinkedInPipeline:
                     all_data.extend(audiences)
 
             elif table_name == "linkedin_ads_campaign_audience":
-                # Same as campaigns but will extract targeting criteria
+                # Extract campaigns and parse targeting criteria
                 for account_id in COMPANY_ACCOUNT_MAP.keys():
                     campaigns = self.adapter.get_campaigns(account_id)
                     all_data.extend(campaigns)
+
+                # Use special extraction for targeting criteria
+                if all_data:
+                    df = extract_targeting_criteria(all_data)
+                    return df
+                else:
+                    return pd.DataFrame()
 
             elif table_name == "linkedin_ads_insights":
                 # Extract insights (requires campaign URNs from DB)
@@ -303,7 +311,15 @@ class LinkedInPipeline:
 
             # Convert to DataFrame
             if all_data:
-                df = pd.DataFrame(all_data)
+                # Check if table has nested_element config - use special flattening
+                nested_element = table_config.get("nested_element", None)
+
+                if nested_element:
+                    logger.debug(f"Using nested response handler for {table_name} with elements: {nested_element}")
+                    df = handle_nested_response(all_data, nested_element)
+                else:
+                    df = pd.DataFrame(all_data)
+
                 return df
             else:
                 return pd.DataFrame()
@@ -524,6 +540,10 @@ class LinkedInPipeline:
         """
         Load DataFrame to data sink.
 
+        Determines load mode from table configuration:
+        - If 'increment' config exists → use increment mode
+        - Otherwise → use append mode (default)
+
         Args:
             df: DataFrame to load
             table_name: Target table name
@@ -538,20 +558,49 @@ class LinkedInPipeline:
             raise PipelineError("Data sink not configured")
 
         try:
+            # Get table configuration to determine load mode
+            table_config = self.config.get(table_name, {})
+
+            # Determine load mode from configuration
+            pk_columns = None
+            increment_columns = None
+
+            if "increment" in table_config:
+                # INCREMENT: Insert new + Increment metrics for existing
+                load_mode = "increment"
+                increment_config = table_config["increment"]
+                pk_columns = increment_config.get("pk_columns")
+                increment_columns = increment_config.get("increment_columns")
+                logger.debug(f"Using increment mode for {table_name}: PK={pk_columns}, metrics={increment_columns}")
+
+            elif "upsert" in table_config:
+                # UPSERT: Insert new + Update all fields for existing
+                load_mode = "upsert"
+                upsert_config = table_config["upsert"]
+                pk_columns = upsert_config.get("pk_columns")
+                logger.debug(f"Using upsert mode for {table_name}: PK={pk_columns}")
+
+            else:
+                # Default: APPEND (insert only new rows, skip duplicates)
+                load_mode = "append"
+                logger.debug(f"Using append mode for {table_name}")
+
             # Check if sink has write_dataframe method (Vertica style)
             if hasattr(self.data_sink, "write_dataframe"):
                 rows_loaded = self.data_sink.write_dataframe(
                     df=df,
                     table_name=table_name,
                     schema_name="GoogleAnalytics",
-                    if_exists="append",
+                    if_exists=load_mode,
                 )
-            # Check if sink has load method (Protocol style)
+            # Check if sink has load method (Protocol style - VerticaDataSink)
             elif hasattr(self.data_sink, "load"):
                 rows_loaded = self.data_sink.load(
                     df=df,
                     table_name=table_name,
-                    mode="append",
+                    mode=load_mode,
+                    dedupe_columns=pk_columns,
+                    increment_columns=increment_columns,
                 )
             else:
                 raise PipelineError("Data sink does not have a compatible load method")

@@ -423,26 +423,12 @@ class SocialPipeline:
                 if self.config.dry_run:
                     logger.info(f"[DRY RUN] Would load {row_count} rows to {table_name}")
                 else:
-                    # Determine load mode from table config
-                    table_config = adapter.config.get(table_name, {})
-                    load_mode = self._determine_load_mode(table_config, table_name)
-
-                    logger.info(f"Loading {row_count} rows to {table_name} (mode={load_mode})...")
-
-                    # Prepare load parameters
-                    load_params = {"df": df, "table_name": table_name, "mode": load_mode}
-                    if load_mode == "increment":
-                        inc_cfg = table_config.get("increment", {})
-                        load_params["dedupe_columns"] = inc_cfg.get("pk_columns")
-                        load_params["increment_columns"] = inc_cfg.get("increment_columns")
-                    elif load_mode == "upsert":
-                        # Support both new (upsert) and legacy (merge/update) config formats
-                        ups_cfg = table_config.get("upsert") or table_config.get("merge") or table_config.get("update") or {}
-                        # Legacy format uses 'fields_id', new format uses 'pk_columns'
-                        pk_cols = ups_cfg.get("pk_columns") or ups_cfg.get("fields_id")
-                        load_params["dedupe_columns"] = pk_cols
-
-                    loaded_count = self.data_sink.load(**load_params)
+                    logger.info(f"Loading {row_count} rows to {table_name}...")
+                    loaded_count = self.data_sink.load(
+                        df=df,
+                        table_name=table_name,
+                        mode="upsert"  # INSERT new rows + UPDATE existing (default)
+                    )
                     logger.info(f"✓ Loaded {loaded_count} rows to {table_name}")
                     row_count = loaded_count
 

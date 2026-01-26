@@ -358,7 +358,7 @@ class FacebookAdapter:
                         "campaign_id": ad_set.get("campaign_id"),
                         "adset_id": ad_set.get("id"),
                         "audience_id": audience.get("id"),
-                        "audience_name": audience.get("name"),
+                        "name": audience.get("name"),
                     })
 
             logger.success(f"Retrieved {len(audience_data)} audience targeting records")

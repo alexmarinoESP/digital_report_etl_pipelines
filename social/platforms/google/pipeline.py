@@ -187,6 +187,7 @@ class GooglePipeline:
     def run_all_tables(
         self,
         load_to_sink: bool = True,
+        tables: Optional[List[str]] = None,
     ) -> Dict[str, pd.DataFrame]:
         """
         Run the pipeline for all configured tables.
@@ -202,6 +203,7 @@ class GooglePipeline:
 
         Args:
             load_to_sink: If True, load data to sink after processing
+            tables: Optional list of specific tables to process (default: all)
 
         Returns:
             Dictionary mapping table names to processed DataFrames
@@ -209,7 +211,9 @@ class GooglePipeline:
         Raises:
             PipelineError: If any critical table fails
         """
-        logger.info(f"Starting pipeline for all tables: {self.table_names}")
+        # Filter tables if specific ones requested
+        tables_to_process = self.table_names if tables is None else [t for t in self.table_names if t in tables]
+        logger.info(f"Starting pipeline for {len(tables_to_process)} table(s): {', '.join(tables_to_process)}")
         start_time = datetime.now()
 
         # Define processing order
@@ -229,6 +233,11 @@ class GooglePipeline:
         for table_name in processing_order:
             if table_name not in self.table_names:
                 logger.debug(f"Skipping {table_name} (not in config)")
+                continue
+
+            # Skip if not in requested tables filter
+            if tables and table_name not in tables:
+                logger.debug(f"Skipping {table_name} (not in requested tables)")
                 continue
 
             try:
@@ -407,15 +416,46 @@ class GooglePipeline:
             raise PipelineError("Data sink not configured")
 
         try:
-            # Determine load mode (truncate vs append/update)
-            if table_config.get("truncate", False):
+            # Determine load mode and parameters
+            pk_columns = None
+            increment_columns = None
+
+            # DEBUG: Log table_config to verify truncate field
+            logger.warning(f"DEBUG table_config for {table_name}: truncate={table_config.get('truncate')}, upsert={table_config.get('upsert')}, increment={table_config.get('increment')}")
+
+            if table_config.get("increment"):
+                # INCREMENT mode: Insert new + Increment metrics for existing
+                load_mode = "increment"
+                increment_config = table_config["increment"]
+                pk_columns = increment_config.get("pk_columns")
+                increment_columns = increment_config.get("increment_columns")
+                logger.debug(f"Using increment mode for {table_name}: PK={pk_columns}, metrics={increment_columns}")
+
+            elif table_config.get("upsert"):
+                # UPSERT mode: Insert new + Update all fields for existing
+                load_mode = "upsert"
+                upsert_config = table_config["upsert"]
+                pk_columns = upsert_config.get("pk_columns")
+                logger.debug(f"Using upsert mode for {table_name}: PK={pk_columns}")
+
+            elif table_config.get("truncate", False):
                 load_mode = "replace"  # Truncate and insert
+                logger.debug(f"Using replace mode for {table_name}")
+
             elif table_config.get("update"):
-                load_mode = "upsert"  # Update existing rows
+                # Legacy: 'update' config → map to 'upsert'
+                load_mode = "upsert"
+                logger.debug(f"Using upsert mode for {table_name} (legacy 'update' config)")
+
             elif table_config.get("merge"):
-                load_mode = "merge"  # Merge with existing data
+                # Legacy: 'merge' config → map to 'upsert'
+                load_mode = "upsert"
+                logger.debug(f"Using upsert mode for {table_name} (legacy 'merge' config)")
+
             else:
-                load_mode = "append"  # Default: append
+                # Default: APPEND (insert only new rows, skip duplicates)
+                load_mode = "append"
+                logger.debug(f"Using append mode for {table_name}")
 
             # Check if sink has write_dataframe method (Vertica style)
             if hasattr(self.data_sink, "write_dataframe"):
@@ -425,12 +465,14 @@ class GooglePipeline:
                     schema_name="GoogleAnalytics",
                     if_exists=load_mode,
                 )
-            # Check if sink has load method (Protocol style)
+            # Check if sink has load method (Protocol style - preferred)
             elif hasattr(self.data_sink, "load"):
                 rows_loaded = self.data_sink.load(
                     df=df,
                     table_name=table_name,
                     mode=load_mode,
+                    dedupe_columns=pk_columns,
+                    increment_columns=increment_columns,
                 )
             else:
                 raise PipelineError("Data sink does not have a compatible load method")

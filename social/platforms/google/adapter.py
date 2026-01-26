@@ -428,8 +428,15 @@ class GoogleAdapter:
         """
         logger.info("Fetching audiences for all customer accounts")
 
-        # Get enabled customer accounts
-        accounts = self._get_enabled_customer_accounts()
+        # Get ALL customer accounts (not just enabled) - queries filter by campaign status
+        all_accounts = self.http_client.get_all_accounts()
+        if not all_accounts:
+            logger.warning("No customer accounts found")
+            return pd.DataFrame()
+
+        accounts = pd.DataFrame(all_accounts)
+        # Filter only non-manager accounts (but include all statuses)
+        accounts = accounts[~accounts.get("manager", False)]
 
         if accounts.empty:
             logger.warning("No enabled customer accounts found")

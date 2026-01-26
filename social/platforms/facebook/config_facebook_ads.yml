@@ -36,12 +36,10 @@ fb_ads_campaign:
   query:
     column_name:
       - campaign_id
-  update:
-    fields_id:
+  # Changed to upsert for full row updates
+  upsert:
+    pk_columns:
       - campaign_id
-    fields_update:
-      - status
-      - effective_status
 
 
 fb_ads_insight:
@@ -53,20 +51,20 @@ fb_ads_insight:
       cols: ['ad_name', 'name']
     drop_columns:
       cols: ['date_stop','date_start']
+    aggregate_by_entity:  # NEW: Aggregate metrics
+      group_columns: null  # Auto-detect (ad_id)
+      metric_columns: null
+      agg_method: 'sum'
     add_row_loaded_date:
       params: None
 
   query:
     column_name:
-      - campaign_id
-      - adset_id
+      - ad_id  # Only ad_id, no dates
+  increment:  # Changed from 'merge'
+    pk_columns:
       - ad_id
-      - account_id
-  merge:
-    table_name_source: fb_ads_insight_source
-    fields_id:
-      - ad_id
-    fields_update:
+    increment_columns:
       - reach
       - inline_link_clicks
       - inline_link_click_ctr
@@ -84,13 +82,16 @@ fb_ads_insight_actions:
   fields: fields_ads_insight_actions
   date_preset: last_14d
   processing:
-
     convert_actions_to_df:
       params: None
     extract_custom_conversion_id:
       params: None
     nan_conversion:
       params: None
+    aggregate_by_entity:  # NEW: Aggregate metrics by ad_id + action_type
+      group_columns: ['ad_id', 'action_type']  # Explicit grouping
+      metric_columns: ['value']
+      agg_method: 'sum'
     add_row_loaded_date:
       params: None
 
@@ -99,17 +100,11 @@ fb_ads_insight_actions:
       - ad_id
       - action_type
   scope: account
-  merge:
-    table_name_source: fb_ads_insight_actions_source
-    fields_id:
+  increment:  # Changed from 'merge'
+    pk_columns:
       - ad_id
       - action_type
-    check_update: # id column of the table to check
-      - ad_id
-      - last_updated_date
-    table_name_check:
-      - fb_ads_insight
-    fields_update:
+    increment_columns:
       - value
 #
 #
@@ -184,11 +179,10 @@ fb_ads_ad_set:
   query:
     column_name:
       - id
-  update:
-    fields_id:
+  # Changed to upsert for full row updates
+  upsert:
+    pk_columns:
       - id
-    fields_update:
-      - end_time
 ##
 
 ####

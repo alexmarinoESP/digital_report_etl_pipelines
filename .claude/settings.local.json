@@ -45,7 +45,16 @@
       "Bash(.venvScriptspython.exe social/test_pipeline.py --platform microsoft --verbose --dry-run)",
       "Bash(Select-Object -First 100)",
       "Bash(Select-String -Pattern \"(SUCCESS|FAIL|ERROR|Duplicate|pk|PRIMARY|Deduplication|new rows)\")",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(Select-String -Pattern \"(FAIL|ERROR|OK|SUCCESS|Fetching|Processing|NULL|totalBudget|audience_id|dailyBudget)\")",
+      "Bash(Select-Object -First 80)",
+      "Bash(.venv\\Scripts\\python.exe test_nested.py:*)",
+      "Bash(del test_nested.py)",
+      "Bash(Select-String -Pattern \"(display_name|columns|Loaded.*audience)\")",
+      "Bash(Select-String -Pattern \"(FAIL|ERROR|OK|SUCCESS|placement|id|Columns in DataFrame)\")",
+      "Bash(del test_placement.py)",
+      "Bash(Select-String -Pattern \"(FAIL|ERROR|OK|SUCCESS|Fetching|Processing|WARNING.*resource_name|WARNING.*placement|id|columns)\")",
+      "Bash(del debug_placement.py debug_google_api_placement.py)"
     ]
   }
 }

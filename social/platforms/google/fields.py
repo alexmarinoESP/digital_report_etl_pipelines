@@ -57,7 +57,7 @@ WHERE segments.date BETWEEN '{}' AND '{}'
 # Placement queries
 query_placement = """
 SELECT
-    group_placement_view.resource_name,
+    ad_group.id,
     group_placement_view.placement,
     group_placement_view.placement_type,
     group_placement_view.display_name,
@@ -73,7 +73,7 @@ AND campaign.status = 'ENABLED'
 
 query_placement_2 = """
 SELECT
-    group_placement_view.resource_name,
+    ad_group.id,
     group_placement_view.placement,
     group_placement_view.placement_type,
     group_placement_view.display_name,

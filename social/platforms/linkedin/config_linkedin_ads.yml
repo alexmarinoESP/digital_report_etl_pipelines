@@ -20,12 +20,10 @@ linkedin_ads_creative:
   query:
     column_name:
       - id
-  update:
-    fields_id:
+  # Changed to upsert for full row updates
+  upsert:
+    pk_columns:
       - id
-    fields_update:
-      - status
-      - campaign_id
   pagination:
     start: 0
     count: 100  # Adjust based on your API limits
@@ -59,12 +57,11 @@ linkedin_ads_campaign:
       columns: ['end_date','start_date']
     modify_name:
       columns: ['name']  # MUST use 'columns' not 'cols'
-  update:
-    fields_id:
+  # Changed from 'update' to 'upsert' for full row updates
+  upsert:
+    pk_columns:
       - id
-    fields_update:
-      - end_date
-      - account
+    # All fields will be updated (INSERT new + UPDATE all fields for existing)
 
 
 linkedin_ads_insights:
@@ -75,10 +72,9 @@ linkedin_ads_insights:
   fields: ['actionClicks','adUnitClicks','clicks','comments','costInLocalCurrency', 'landingPageClicks','likes','reactions','shares','totalEngagements','dateRange','pivotValues','impressions','externalWebsiteConversions','conversionValueInLocalCurrency']
   query:
     column_name:
-      - creative_id
-      - date
+      - creative_id  # No more 'date' - using cumulative metrics
   processing:
-    build_date_field:
+    build_date_field:  # Still build date to aggregate by it
       fields_date: ['year', 'month', 'day']
       begin_end: ['start', 'end']
     replace_nan_with_zero:
@@ -86,15 +82,16 @@ linkedin_ads_insights:
     response_decoration:
       field: pivotValues
       new_col_name: creative_id
-    add_row_loaded_date: None  # None or params: None in old code
-  merge:
-    table_name_source: linkedin_ads_insights_source
-    fields_id:
+    aggregate_by_entity:  # NEW: Aggregate metrics (removes date)
+      group_columns: null  # Auto-detect (creative_id)
+      metric_columns: null  # Auto-detect (all numeric)
+      agg_method: 'sum'
+    add_row_loaded_date: None
+  # Changed from 'merge' to 'increment' mode
+  increment:
+    pk_columns:  # Primary key (no date)
       - creative_id
-      - date
-    table_name_check:
-      - linkedin_ads_insights
-    fields_update:
+    increment_columns:  # Metrics to increment
       - actionClicks
       - adUnitClicks
       - impressions
@@ -123,11 +120,10 @@ linkedin_ads_campaign_audience:
       columns:
       - id
     add_row_loaded_date: None  # None or params: None in old code
-  update:
-    fields_id:
+  # Changed to upsert for full row updates
+  upsert:
+    pk_columns:
       - id
-    fields_update:
-      - audience_id
 
 linkedin_ads_account:
   q: search
@@ -141,11 +137,10 @@ linkedin_ads_account:
     add_company:
       params: None
     add_row_loaded_date: None  # None or params: None in old code
-  update:
-    fields_id:
+  # Changed to upsert for full row updates
+  upsert:
+    pk_columns:
       - id
-    fields_update:
-      - status
 #
 #
 #

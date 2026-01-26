@@ -217,13 +217,63 @@ class FacebookPipeline:
         return processor.get_df()
 
     def _load_to_sink(self, df: pd.DataFrame, table_name: str) -> None:
-        """Load processed data to the configured data sink."""
+        """Load processed data to the configured data sink.
+
+        Determines load mode from table configuration:
+        - If 'increment' config exists → use increment mode
+        - Otherwise → use append mode (default)
+        """
         if not self.data_sink:
             logger.warning("No data sink configured, skipping load")
             return
 
         try:
-            rows_written = self.data_sink.write(df=df, table_name=table_name, if_exists="append")
+            # Get table configuration to determine load mode
+            table_config = self.config.get(table_name, {})
+
+            # Determine load mode from configuration
+            pk_columns = None
+            increment_columns = None
+
+            if "increment" in table_config:
+                # INCREMENT: Insert new + Increment metrics for existing
+                load_mode = "increment"
+                increment_config = table_config["increment"]
+                pk_columns = increment_config.get("pk_columns")
+                increment_columns = increment_config.get("increment_columns")
+                logger.debug(f"Using increment mode for {table_name}: PK={pk_columns}, metrics={increment_columns}")
+
+            elif "upsert" in table_config:
+                # UPSERT: Insert new + Update all fields for existing
+                load_mode = "upsert"
+                upsert_config = table_config["upsert"]
+                pk_columns = upsert_config.get("pk_columns")
+                logger.debug(f"Using upsert mode for {table_name}: PK={pk_columns}")
+
+            else:
+                # Default: APPEND (insert only new rows, skip duplicates)
+                load_mode = "append"
+                logger.debug(f"Using append mode for {table_name}")
+
+            # Write to sink with appropriate method
+            if hasattr(self.data_sink, "load"):
+                # VerticaDataSink has load() with all modes
+                rows_written = self.data_sink.load(
+                    df=df,
+                    table_name=table_name,
+                    mode=load_mode,
+                    dedupe_columns=pk_columns,
+                    increment_columns=increment_columns,
+                )
+            elif hasattr(self.data_sink, "write"):
+                # Fallback to write() method (older sinks - limited support)
+                if load_mode in ["increment", "upsert"]:
+                    logger.warning(f"Data sink does not support {load_mode} mode, falling back to append")
+                    load_mode = "append"
+                rows_written = self.data_sink.write(df=df, table_name=table_name, if_exists=load_mode)
+            else:
+                raise PipelineError("Data sink has no compatible write/load method")
+
             logger.success(f"Loaded {rows_written} rows to {table_name}")
         except Exception as e:
             logger.error(f"Failed to load data to sink: {str(e)}")

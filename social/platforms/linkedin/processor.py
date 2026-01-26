@@ -24,6 +24,7 @@ import pandas as pd
 from loguru import logger
 
 from social.platforms.linkedin.constants import COMPANY_ACCOUNT_MAP
+from social.utils.aggregation import aggregate_metrics_by_entity
 
 
 class LinkedInProcessor:
@@ -452,3 +453,45 @@ class LinkedInProcessor:
             flags=re.UNICODE
         )
         return emoji_pattern.sub(r'', text)
+
+    def aggregate_by_entity(
+        self,
+        group_columns: List[str] = None,
+        metric_columns: List[str] = None,
+        agg_method: str = 'sum',
+    ) -> "LinkedInProcessor":
+        """Aggregate metrics by entity (remove date granularity).
+
+        Transforms time-series data into cumulative metrics using shared utility function.
+
+        Example:
+            Before aggregation:
+                creative_id | date       | impressions | clicks
+                123        | 2026-01-20 | 100        | 5
+                123        | 2026-01-21 | 150        | 8
+                123        | 2026-01-22 | 120        | 6
+
+            After aggregation:
+                creative_id | impressions | clicks
+                123        | 370         | 19
+
+        Args:
+            group_columns: Columns to group by (default: auto-detect)
+            metric_columns: Columns to aggregate (default: all numeric)
+            agg_method: Aggregation method (default: 'sum')
+
+        Returns:
+            Self for chaining
+        """
+        if self.df.empty:
+            return self
+
+        self.df = aggregate_metrics_by_entity(
+            df=self.df,
+            group_columns=group_columns,
+            metric_columns=metric_columns,
+            agg_method=agg_method,
+            entity_id_columns=['creative_id', 'campaign_id', 'account', 'id']
+        )
+
+        return self

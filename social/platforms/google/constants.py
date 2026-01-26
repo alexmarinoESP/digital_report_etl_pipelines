@@ -80,11 +80,11 @@ GAQL_QUERIES: Dict[str, str] = {
 
     # Placement query - for ENABLED campaigns
     "query_placement": """
-        SELECT group_placement_view.placement,
+        SELECT group_placement_view.resource_name,
+        group_placement_view.placement,
         group_placement_view.placement_type,
         group_placement_view.display_name,
         group_placement_view.target_url,
-        ad_group.id,
         metrics.impressions,
         metrics.active_view_ctr,
         customer.id
@@ -96,11 +96,11 @@ GAQL_QUERIES: Dict[str, str] = {
 
     # Placement query - for PAUSED campaigns
     "query_placement_2": """
-        SELECT group_placement_view.placement,
+        SELECT group_placement_view.resource_name,
+        group_placement_view.placement,
         group_placement_view.placement_type,
         group_placement_view.display_name,
         group_placement_view.target_url,
-        ad_group.id,
         metrics.impressions,
         metrics.active_view_ctr,
         customer.id
@@ -205,6 +205,7 @@ COLUMN_MAPPINGS: Dict[str, str] = {
     "segments.device": "device",
 
     # Placement fields
+    "group_placement_view.resource_name": "resource_name",
     "group_placement_view.placement": "placement",
     "group_placement_view.placement_type": "placement_type",
     "group_placement_view.display_name": "display_name",
@@ -222,4 +223,32 @@ COLUMN_MAPPINGS: Dict[str, str] = {
     "customer_client.time_zone": "time_zone",
     "customer_client.level": "level",
     "customer_client.client_customer": "client_customer",
+
+    # Customer client fields (camelCase from MessageToDict)
+    "descriptiveName": "descriptive_name",
+    "clientCustomer": "client_customer",
+    "timeZone": "time_zone",
+    "currencyCode": "currency_code",
+    "managerId": "manager_id",
+
+    # Ad group criterion fields (camelCase from json_normalize)
+    "adGroupCriterion.displayName": "display_name",
+
+    # After handle_columns() removes prefixes and converts to lowercase
+    # "adGroupCriterion.displayName" → "displayName" → "displayname"
+    "displayName": "display_name",
+    "displayname": "display_name",
+
+    # Campaign fields after handle_columns() lowercase conversion
+    "startdate": "start_date",
+    "enddate": "end_date",
+    "servingstatus": "serving_status",
+
+    # Metrics fields after handle_columns() lowercase conversion
+    "costmicros": "cost_micros",
+    "activeviewctr": "active_view_ctr",
+
+    # Placement fields after handle_columns() lowercase conversion
+    "placementtype": "placement_type",
+    "targeturl": "target_url",
 }

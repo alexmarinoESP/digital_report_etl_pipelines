@@ -27,6 +27,7 @@ import pandas as pd
 from loguru import logger
 
 from social.platforms.google.constants import COMPANY_ACCOUNT_MAP, MICROS_DIVISOR
+from social.utils.aggregation import aggregate_metrics_by_entity
 
 
 class GoogleProcessor:
@@ -82,6 +83,8 @@ class GoogleProcessor:
             return self
 
         try:
+            logger.debug(f"handle_columns BEFORE: {self.df.columns.tolist()}")
+
             # 1. Remove prefixes (split on first dot), except for 'customer'
             new_columns = []
             for col in self.df.columns:
@@ -94,13 +97,14 @@ class GoogleProcessor:
             # 2. Replace remaining dots with underscores
             self.df.columns = [col.replace(".", "_") for col in self.df.columns]
 
-            # 3. Remove 'resource' columns
-            cols_to_keep = [col for col in self.df.columns if "resource" not in col.lower()]
+            # 3. Remove 'resource' columns (except resource_name which is needed for placement)
+            cols_to_keep = [col for col in self.df.columns if "resource" not in col.lower() or "resource_name" in col.lower()]
             self.df = self.df[cols_to_keep]
 
             # 4. Convert to lowercase
             self.df.columns = [col.lower() for col in self.df.columns]
 
+            logger.debug(f"handle_columns AFTER: {self.df.columns.tolist()}")
             logger.debug(f"Cleaned {len(self.df.columns)} Google Ads column names")
 
         except Exception as e:
@@ -205,6 +209,8 @@ class GoogleProcessor:
         """
         Add row_loaded_date column with current timestamp.
 
+        DEPRECATED: Use add_load_date() instead.
+
         Returns:
             Self for chaining
         """
@@ -213,6 +219,21 @@ class GoogleProcessor:
 
         self.df["row_loaded_date"] = datetime.now()
         logger.debug("Added row_loaded_date column")
+
+        return self
+
+    def add_load_date(self) -> "GoogleProcessor":
+        """
+        Add load_date column with current date (no timestamp).
+
+        Returns:
+            Self for chaining
+        """
+        if self.df.empty:
+            return self
+
+        self.df["load_date"] = datetime.now().date()
+        logger.debug("Added load_date column")
 
         return self
 
@@ -498,6 +519,15 @@ class GoogleProcessor:
             return self
 
         original_count = len(self.df)
+
+        # Log columns with NaN values BEFORE dropping
+        nan_cols = [col for col in self.df.columns if self.df[col].isna().any()]
+        if nan_cols:
+            logger.debug(f"Columns with NaN values: {nan_cols}")
+            for col in nan_cols:
+                nan_count = self.df[col].isna().sum()
+                logger.debug(f"  {col}: {nan_count} NaN values ({nan_count/original_count*100:.1f}%)")
+
         self.df = self.df.dropna()
         dropped = original_count - len(self.df)
 
@@ -522,6 +552,42 @@ class GoogleProcessor:
 
         if dropped > 0:
             logger.debug(f"Dropped {dropped} duplicate rows")
+
+        return self
+
+    def keep_highest_level(self, id_column: str = "id") -> "GoogleProcessor":
+        """
+        Keep only rows with the highest level for each ID.
+
+        For duplicate IDs (same account appearing at multiple hierarchy levels),
+        keep only the row with the highest level value.
+
+        Args:
+            id_column: Column name containing the ID (default: "id")
+
+        Returns:
+            Self for chaining
+        """
+        if self.df.empty:
+            return self
+
+        if id_column not in self.df.columns or "level" not in self.df.columns:
+            logger.warning(f"Cannot filter by level: missing '{id_column}' or 'level' column")
+            return self
+
+        original_count = len(self.df)
+
+        # Sort by level descending, then keep first occurrence of each ID
+        self.df = (
+            self.df
+            .sort_values("level", ascending=False)
+            .drop_duplicates(subset=[id_column], keep="first")
+            .reset_index(drop=True)
+        )
+
+        filtered = original_count - len(self.df)
+        if filtered > 0:
+            logger.info(f"Filtered {filtered} duplicate IDs, keeping highest level for each")
 
         return self
 
@@ -577,7 +643,36 @@ class GoogleProcessor:
 
         if valid_renames:
             self.df = self.df.rename(columns=valid_renames)
-            logger.debug(f"Renamed {len(valid_renames)} Google Ads columns using COLUMN_MAPPINGS")
+            logger.debug(f"Renamed {len(valid_renames)} Google Ads columns")
+
+        return self
+
+    def extract_id_from_resource_name(self) -> "GoogleProcessor":
+        """
+        Extract ad group ID from resource_name and create 'id' column.
+
+        Resource name format: customers/{customer_id}/adGroups/{ad_group_id}~{criterion_id}
+        or customers/{customer_id}/adGroups/{ad_group_id}
+
+        Returns:
+            Self for chaining
+        """
+        if self.df.empty:
+            return self
+
+        if "resource_name" not in self.df.columns:
+            logger.warning("Missing 'resource_name' column, cannot extract id")
+            return self
+
+        try:
+            # Extract ad group ID from resource_name
+            # Format: customers/XXX/adGroups/YYY or customers/XXX/adGroups/YYY~ZZZ
+            self.df["id"] = self.df["resource_name"].str.extract(r"/adGroups/(\d+)")[0]
+
+            logger.debug("Extracted ad group ID from resource_name")
+
+        except Exception as e:
+            logger.warning(f"Failed to extract ID from resource_name: {e}")
 
         return self
 
@@ -662,3 +757,34 @@ class GoogleProcessor:
             Text with only Latin characters
         """
         return re.sub(r'[^a-zA-Z0-9\s\-.,;:!?()\[\]\'"]+', "", text)
+
+    def aggregate_by_entity(
+        self,
+        group_columns: List[str] = None,
+        metric_columns: List[str] = None,
+        agg_method: str = 'sum',
+    ) -> "GoogleProcessor":
+        """Aggregate metrics by entity (remove date granularity).
+
+        Transforms time-series data into cumulative metrics using shared utility function.
+
+        Args:
+            group_columns: Columns to group by (default: auto-detect)
+            metric_columns: Columns to aggregate (default: all numeric)
+            agg_method: Aggregation method (default: 'sum')
+
+        Returns:
+            Self for chaining
+        """
+        if self.df.empty:
+            return self
+
+        self.df = aggregate_metrics_by_entity(
+            df=self.df,
+            group_columns=group_columns,
+            metric_columns=metric_columns,
+            agg_method=agg_method,
+            entity_id_columns=['ad_id', 'adgroup_id', 'campaign_id', 'customer_id_google']
+        )
+
+        return self

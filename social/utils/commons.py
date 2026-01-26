@@ -7,7 +7,7 @@ import re
 import sys
 import time
 from datetime import datetime, timedelta
-from typing import Any, AnyStr, Callable, List, Tuple, Union
+from typing import Any, AnyStr, Callable, Dict, List, Tuple, Union
 
 import emoji
 import joblib
@@ -290,3 +290,172 @@ def get_range_dates(days: int) -> Tuple[str, str]:
     until = datetime.now().strftime("%Y-%m-%d")
 
     return since, until
+
+
+def check_array_length(dic: dict) -> dict:
+    """Ensure all dictionary values have same length by padding with None."""
+    dict_check = {k: len(v) for k, v in dic.items()}
+    max_len = max(dict_check.values()) if dict_check else 0
+
+    for k, v in dict_check.items():
+        if v < max_len:
+            dic[k] = dic.get(k, []) + [None]
+
+    return dic
+
+
+def _handle_nested_dic_internal(outputdict, dic, nested_element):
+    """Internal handler for nested dictionaries - flattens nested structures."""
+    for key, value in dic.items():
+        if isinstance(value, dict):
+            if key in nested_element:
+                # This is a nested element we want to flatten
+                for k2, v2 in value.items():
+                    if isinstance(v2, dict):
+                        # Nested 3 levels deep
+                        for k3, v3 in v2.items():
+                            if isinstance(v3, list):
+                                # Handle list values
+                                for v3_key, v3_inner_value in v3[0].items():
+                                    outputdict[v3_key] = outputdict.get(v3_key, []) + [v3_inner_value]
+                            else:
+                                # Create flattened key: totalBudget_amount_...
+                                full_key = f"{key}_{k2}_{k3}"
+                                outputdict[full_key] = outputdict.get(full_key, []) + [v3]
+                    else:
+                        # Nested 2 levels: totalBudget_amount
+                        full_key = f"{key}_{k2}"
+                        outputdict[full_key] = outputdict.get(full_key, []) + [v2]
+            else:
+                # Not in nested_element list - extract values directly
+                for k2, v2 in value.items():
+                    if isinstance(v2, list):
+                        outputdict[k2] = outputdict.get(k2, []) + [v2[0]]
+                    else:
+                        outputdict[k2] = outputdict.get(k2, []) + [v2]
+        else:
+            # Simple value
+            if isinstance(value, list):
+                outputdict[key] = outputdict.get(key, []) + [value[0]]
+            else:
+                outputdict[key] = outputdict.get(key, []) + [value]
+
+    return outputdict
+
+
+def handle_nested_response(alist: List, nested_element: List) -> pd.DataFrame:
+    """
+    Handle nested dictionary response and flatten nested structures.
+
+    This function converts nested API responses into a flat DataFrame suitable for database insertion.
+    Nested elements specified in the nested_element list will be flattened with underscore-separated keys.
+
+    Args:
+        alist: List of dictionaries from API response
+        nested_element: List of keys that contain nested dictionaries to flatten
+
+    Returns:
+        DataFrame with flattened columns
+
+    Examples:
+        Input: {'dailyBudget': {'currencyCode': 'EUR', 'amount': 10}}
+        With nested_element=['dailyBudget']
+        Output columns: dailyBudget_currencyCode, dailyBudget_amount
+        Values: 'EUR', 10
+    """
+    outputdict = {}
+
+    for dic in alist:
+        if isinstance(dic, dict):
+            outputdict = _handle_nested_dic_internal(outputdict, dic, nested_element)
+        else:
+            # Handle list of lists
+            for a in dic:
+                outputdict = _handle_nested_dic_internal(outputdict, a, nested_element)
+
+        # Ensure all arrays have same length
+        outputdict = check_array_length(outputdict)
+
+    return pd.DataFrame(dict([(k, pd.Series(v)) for k, v in outputdict.items()]))
+
+
+def handle_simple_response(response: Union[dict, List]) -> pd.DataFrame:
+    """Handle simple (non-nested) response by converting directly to DataFrame."""
+    if isinstance(response, List):
+        dfs = []
+        for idx, r in enumerate(response):
+            try:
+                dfs.append(pd.DataFrame(r))
+            except ValueError:
+                dfs.append(pd.DataFrame(r, index=[idx]))
+        return pd.concat(dfs, ignore_index=True)
+    else:
+        try:
+            return pd.DataFrame(response)
+        except ValueError:
+            return pd.DataFrame(response, index=[0])
+
+
+def extract_targeting_criteria(campaigns: List[Dict]) -> pd.DataFrame:
+    """
+    Extract audience_id from LinkedIn campaign targetingCriteria.
+
+    This function parses the nested targetingCriteria structure to extract
+    audience segment IDs for campaign-audience relationships.
+
+    Args:
+        campaigns: List of campaign dictionaries from LinkedIn API
+
+    Returns:
+        DataFrame with columns: id, audience_id
+
+    Examples:
+        Input campaign with targetingCriteria containing audience segments
+        Output: DataFrame with campaign id and extracted audience_id
+    """
+    audiences = [
+        "urn:li:adTargetingFacet:audienceMatchingSegments",
+        "urn:li:adTargetingFacet:dynamicSegments",
+    ]
+    segments = []
+    ids = []
+
+    for campaign in campaigns:
+        try:
+            target = campaign.get("targetingCriteria", {}).get("include", {}).get("and", [])
+
+            # Extract elements from targeting
+            elements_target = [item.get("or", []) for item in target if isinstance(item, dict)]
+
+            # Look for audience facets
+            segment = []
+            for aud_facet in audiences:
+                for elem in elements_target:
+                    # elem is a list of dicts
+                    for e in elem:
+                        if isinstance(e, dict) and aud_facet in e:
+                            val = e.get(aud_facet)
+                            if val:
+                                segment.append(val if isinstance(val, str) else val[0])
+
+            segment = list(filter(None, segment))
+
+            if len(segment) > 0:
+                # Extract segment ID from URN
+                seg = segment[0]
+                if "urn:li:adSegment:" in seg:
+                    seg = seg.split("urn:li:adSegment:")[1]
+                    segments.append(seg)
+                else:
+                    segments.append(None)
+            else:
+                segments.append(None)
+
+            ids.append(campaign.get("id"))
+
+        except Exception as e:
+            logger.debug(f"Could not extract targeting for campaign: {e}")
+            ids.append(campaign.get("id"))
+            segments.append(None)
+
+    return pd.DataFrame({"id": ids, "audience_id": segments})

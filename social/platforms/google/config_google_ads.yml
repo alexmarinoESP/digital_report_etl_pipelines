@@ -37,7 +37,7 @@ google_ads_placement:
       params: None
     google_rename_columns:
       params: None
-    add_row_loaded_date:
+    add_load_date:
       params: None
     fill_view_ctr_nan:
       cols: ['active_view_ctr']
@@ -69,13 +69,14 @@ google_ads_ad_creatives:
       params: None
     handle_columns:
       params: None
-    add_row_loaded_date:
+    add_load_date:
       params: None
   scope: GoogleAdsService
   query:
     column_name:
       - ad_id
       - adgroup_id
+  # Uses APPEND mode: insert only new rows based on pk_columns
 #
 #
 google_ads_campaign:
@@ -90,7 +91,7 @@ google_ads_campaign:
       params: None
     modify_name:
       columns: ['name']
-    add_row_loaded_date:
+    add_load_date:
       params: None
     replace_nat:
       params: None
@@ -126,6 +127,10 @@ google_ads_report:
       params: None
     convert_costs:
       col: ['cost_micros','costmicros','averagecpm','averagecost','averagecpc']
+    aggregate_by_entity:  # NEW: Aggregate metrics
+      group_columns: ['campaign_id', 'adgroup_id', 'ad_id']
+      metric_columns: null
+      agg_method: 'sum'
     dropna_value:
       params: None
     add_row_loaded_date:
@@ -137,17 +142,12 @@ google_ads_report:
       - campaign_id
       - adgroup_id
       - ad_id
-      - date
-  merge:
-    table_name_source: google_ads_report_source
-    fields_id:
+  increment:  # Changed from 'merge'
+    pk_columns:
       - campaign_id
       - adgroup_id
       - ad_id
-      - date
-    table_name_check:
-      - google_ads_report
-    fields_update:
+    increment_columns:
       - clicks
       - impressions
       - conversions
@@ -170,7 +170,7 @@ google_ads_audience:
       params: None
     google_rename_columns:
       params: None
-    add_row_loaded_date:
+    add_load_date:
       params: None
     clean_audience_string:
       params: None
@@ -199,7 +199,7 @@ google_ads_cost_by_device:
       col: ['cost_micros','costmicros','averagecpm','averagecost','averagecpc']
     aggregate_by_keys:
       params: None
-    add_row_loaded_date:
+    add_load_date:
       params: None
     dropna_value:
       params: None
@@ -208,7 +208,7 @@ google_ads_cost_by_device:
     column_name:
       - ad_id
       - device
-  update:
+  update:  # Legacy config: uses UPSERT to replace values
     fields_id:
       - ad_id
       - device
@@ -216,7 +216,6 @@ google_ads_cost_by_device:
       - cost_micros
       - clicks
       - customer_id_google
-      - row_loaded_date
 # TEST TABLE - COMMENTED OUT FOR PRODUCTION
 # Uncomment this section for testing purposes only
 #google_ads_cost_by_device_test:
@@ -251,9 +250,14 @@ google_ads_account:
       params: None
     modify_name:
       columns: ['descriptive_name']
-    add_row_loaded_date:
+    keep_highest_level:
+      params: None
+    drop_duplicates:
+      params: None
+    add_load_date:
       params: None
   scope: account
   query:
     column_name:
       - id
+  truncate: True
