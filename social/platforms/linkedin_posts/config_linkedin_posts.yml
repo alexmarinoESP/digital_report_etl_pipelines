@@ -1,0 +1,106 @@
+# LinkedIn Organic Posts Platform Configuration
+# Uses Community Management API for organic content metrics
+
+platform:
+  api_base_url: "https://api.linkedin.com/rest"
+  api_version: "202509"
+
+
+# =============================================================================
+# POSTS TABLE
+# Content and metadata of organic posts
+# =============================================================================
+linkedin_organic_posts:
+  request: get_posts
+  type: POSTS
+  query:
+    column_name:
+      - post_id
+  processing:
+    clean_text_columns:
+      columns: ['commentary', 'media_title']
+    add_row_loaded_date: None
+    add_last_updated_date: None
+  upsert:
+    pk_columns:
+      - post_id
+
+
+# =============================================================================
+# POSTS INSIGHTS TABLE
+# Engagement metrics for each post (lifetime totals)
+# =============================================================================
+linkedin_organic_posts_insights:
+  request: get_posts_insights
+  type: SHARE_STATISTICS
+  query:
+    column_name:
+      - post_id
+  processing:
+    add_row_loaded_date: None
+    add_last_updated_date: None
+  upsert:
+    pk_columns:
+      - post_id
+
+
+# =============================================================================
+# PAGE STATISTICS TABLE
+# Daily page view statistics
+# =============================================================================
+linkedin_organic_page_stats:
+  request: get_page_stats
+  type: PAGE_STATISTICS
+  query:
+    column_name:
+      - organization_id
+      - date
+  processing:
+    add_row_loaded_date: None
+    add_last_updated_date: None
+  upsert:
+    pk_columns:
+      - organization_id
+      - date
+
+
+# =============================================================================
+# FOLLOWERS TABLE
+# Daily follower growth statistics
+# =============================================================================
+linkedin_organic_followers:
+  request: get_followers
+  type: FOLLOWER_STATISTICS
+  query:
+    column_name:
+      - organization_id
+      - date
+  processing:
+    add_row_loaded_date: None
+    add_last_updated_date: None
+  upsert:
+    pk_columns:
+      - organization_id
+      - date
+
+
+# =============================================================================
+# FOLLOWER DEMOGRAPHICS TABLE
+# Breakdown of followers by demographics
+# =============================================================================
+linkedin_organic_follower_demographics:
+  request: get_follower_demographics
+  type: FOLLOWER_DEMOGRAPHICS
+  query:
+    column_name:
+      - organization_id
+      - demographic_type
+      - demographic_value
+  processing:
+    add_row_loaded_date: None
+    add_last_updated_date: None
+  upsert:
+    pk_columns:
+      - organization_id
+      - demographic_type
+      - demographic_value

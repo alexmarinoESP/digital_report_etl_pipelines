@@ -54,7 +54,9 @@
       "Bash(Select-String -Pattern \"(FAIL|ERROR|OK|SUCCESS|placement|id|Columns in DataFrame)\")",
       "Bash(del test_placement.py)",
       "Bash(Select-String -Pattern \"(FAIL|ERROR|OK|SUCCESS|Fetching|Processing|WARNING.*resource_name|WARNING.*placement|id|columns)\")",
-      "Bash(del debug_placement.py debug_google_api_placement.py)"
+      "Bash(del debug_placement.py debug_google_api_placement.py)",
+      "Bash(pip install:*)",
+      "Bash(git log:*)"
     ]
   }
 }

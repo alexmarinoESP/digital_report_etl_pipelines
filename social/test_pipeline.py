@@ -214,9 +214,8 @@ def run_tests(args):
         if results:
             tests_passed += 1
 
-            # Validate results
-            if validate_results(results):
-                tests_passed += 0.5  # Bonus for successful validation
+            # Validate and display results (doesn't affect test count)
+            validate_results(results)
 
         # Cleanup
         pipeline.cleanup()

@@ -317,6 +317,7 @@ class LinkedInPipeline:
                 if nested_element:
                     logger.debug(f"Using nested response handler for {table_name} with elements: {nested_element}")
                     df = handle_nested_response(all_data, nested_element)
+                    logger.debug(f"DataFrame columns after flatten: {list(df.columns)}")
                 else:
                     df = pd.DataFrame(all_data)
 
@@ -469,9 +470,11 @@ class LinkedInPipeline:
                 # Call the method with parameters
                 if step_params is None or step_params == "None":
                     # No parameters needed
+                    logger.debug(f"Calling {step_name}() with no params")
                     processor = method()
                 elif isinstance(step_params, dict):
                     # Parameters as dictionary
+                    logger.debug(f"Calling {step_name}() with params: {step_params}")
                     processor = method(**step_params)
                 else:
                     logger.warning(f"Invalid parameters for {step_name}: {step_params}")
@@ -481,7 +484,10 @@ class LinkedInPipeline:
                 logger.error(f"Failed to apply processing step '{step_name}': {e}")
                 # Continue with other steps
 
-        return processor.get_df()
+        # Log final DataFrame columns
+        final_df = processor.get_df()
+        logger.debug(f"Final DataFrame columns after processing: {list(final_df.columns)}")
+        return final_df
 
     def _get_campaign_urns_from_db(self) -> pd.DataFrame:
         """Query database for campaign URNs for insights.

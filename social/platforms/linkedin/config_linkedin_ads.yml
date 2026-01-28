@@ -35,7 +35,7 @@ linkedin_ads_campaign:
   pageSize: '10000'  # Changed from 1000 to 10000 (old working value)
   type: CAMPAIGN
   pagination: True
-  nested_element: ['totalBudget', 'dailyBudget', 'unitCost']
+  nested_element: ['totalBudget', 'dailyBudget', 'unitCost', 'runSchedule']
   #fields: ['objectiveType','runSchedule','optimizationTargetType','costType','name','id','status', 'totalBudget','dailyBudget','account','unitCost']
   query:
     column_name:
@@ -47,11 +47,11 @@ linkedin_ads_campaign:
     convert_int:
       columns: ['id']
     convert_unix_timestamp_to_date:
-      columns: ['start', 'end']
+      columns: ['runSchedule_start', 'runSchedule_end']
     rename_column:
       renaming:
-        start: start_date
-        end: end_date
+        runSchedule_start: start_date
+        runSchedule_end: end_date
     add_row_loaded_date: None  # None or params: None in old code
     convert_nat_to_nan:
       columns: ['end_date','start_date']
@@ -72,39 +72,21 @@ linkedin_ads_insights:
   fields: ['actionClicks','adUnitClicks','clicks','comments','costInLocalCurrency', 'landingPageClicks','likes','reactions','shares','totalEngagements','dateRange','pivotValues','impressions','externalWebsiteConversions','conversionValueInLocalCurrency']
   query:
     column_name:
-      - creative_id  # No more 'date' - using cumulative metrics
+      - creative_id
   processing:
-    build_date_field:  # Still build date to aggregate by it
-      fields_date: ['year', 'month', 'day']
-      begin_end: ['start', 'end']
+    # Note: Using timeGranularity=ALL in API call, so no need to aggregate
+    # API returns lifetime totals per creative directly
     replace_nan_with_zero:
       columns: ['costInLocalCurrency', 'conversionValueInLocalCurrency']
     response_decoration:
       field: pivotValues
       new_col_name: creative_id
-    aggregate_by_entity:  # NEW: Aggregate metrics (removes date)
-      group_columns: null  # Auto-detect (creative_id)
-      metric_columns: null  # Auto-detect (all numeric)
-      agg_method: 'sum'
     add_row_loaded_date: None
-  # Changed from 'merge' to 'increment' mode
-  increment:
-    pk_columns:  # Primary key (no date)
+  # UPSERT: Each call overwrites with latest lifetime totals from API
+  # No risk of data duplication since API returns aggregated totals
+  upsert:
+    pk_columns:
       - creative_id
-    increment_columns:  # Metrics to increment
-      - actionClicks
-      - adUnitClicks
-      - impressions
-      - clicks
-      - comments
-      - landingPageClicks
-      - externalWebsiteConversions
-      - likes
-      - reactions
-      - shares
-      - totalEngagements
-      - costInLocalCurrency
-      - conversionValueInLocalCurrency
 
 linkedin_ads_campaign_audience:
   q: search
