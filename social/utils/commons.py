@@ -211,7 +211,8 @@ def check_array_length(dic: dict) -> dict:
 
     for k, v in dict_check.items():
         if v < max_len:
-            dic[k] = dic.get(k, []) + [None]
+            # Pad with enough None values to reach max_len
+            dic[k] = dic.get(k, []) + [None] * (max_len - v)
 
     return dic
 
@@ -299,7 +300,8 @@ def check_array_length(dic: dict) -> dict:
 
     for k, v in dict_check.items():
         if v < max_len:
-            dic[k] = dic.get(k, []) + [None]
+            # Pad with enough None values to reach max_len
+            dic[k] = dic.get(k, []) + [None] * (max_len - v)
 
     return dic
 
@@ -422,21 +424,28 @@ def extract_targeting_criteria(campaigns: List[Dict]) -> pd.DataFrame:
 
     for campaign in campaigns:
         try:
-            target = campaign.get("targetingCriteria", {}).get("include", {}).get("and", [])
+            targeting = campaign.get("targetingCriteria", {})
+            target = targeting.get("include", {}).get("and", [])
+
+            # DEBUG: Log first campaign's targeting structure
+            if campaign == campaigns[0]:
+                logger.debug(f"First campaign targetingCriteria keys: {targeting.keys() if targeting else 'None'}")
+                logger.debug(f"First campaign include.and length: {len(target)}")
 
             # Extract elements from targeting
-            elements_target = [item.get("or", []) for item in target if isinstance(item, dict)]
+            # Each item in "and" has an "or" key with a dict of facets
+            elements_target = [item.get("or", {}) for item in target if isinstance(item, dict)]
 
             # Look for audience facets
             segment = []
             for aud_facet in audiences:
                 for elem in elements_target:
-                    # elem is a list of dicts
-                    for e in elem:
-                        if isinstance(e, dict) and aud_facet in e:
-                            val = e.get(aud_facet)
-                            if val:
-                                segment.append(val if isinstance(val, str) else val[0])
+                    # elem is a dict like {"urn:li:adTargetingFacet:dynamicSegments": ["urn:li:adSegment:123", ...]}
+                    if aud_facet in elem:
+                        val = elem.get(aud_facet)
+                        if val:
+                            # val is a list of URNs, take first one
+                            segment.append(val[0] if isinstance(val, list) else val)
 
             segment = list(filter(None, segment))
 
@@ -458,4 +467,7 @@ def extract_targeting_criteria(campaigns: List[Dict]) -> pd.DataFrame:
             ids.append(campaign.get("id"))
             segments.append(None)
 
-    return pd.DataFrame({"id": ids, "audience_id": segments})
+    df = pd.DataFrame({"id": ids, "audience_id": segments})
+    non_null_count = df["audience_id"].notna().sum()
+    logger.debug(f"extract_targeting_criteria: {len(df)} campaigns, {non_null_count} with audience_id")
+    return df

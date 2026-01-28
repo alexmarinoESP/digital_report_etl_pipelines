@@ -239,8 +239,12 @@ class LinkedInProcessor:
         logger.debug(f"Added company IDs for {len(self.df)} rows")
         return self
 
-    def add_row_loaded_date(self) -> "LinkedInProcessor":
-        """Add row_loaded_date column with current timestamp.
+    def add_load_date(self) -> "LinkedInProcessor":
+        """Add load_date and row_loaded_date columns with current date.
+
+        Creates both columns for compatibility:
+        - load_date: new column (date only)
+        - row_loaded_date: legacy column (date only)
 
         Returns:
             Self for chaining
@@ -248,9 +252,16 @@ class LinkedInProcessor:
         if self.df.empty:
             return self
 
-        self.df["row_loaded_date"] = datetime.now()
-        logger.debug("Added row_loaded_date column")
+        today = datetime.now().date()
+        self.df["load_date"] = today
+        self.df["row_loaded_date"] = today
+        logger.debug("Added load_date and row_loaded_date columns")
         return self
+
+    # Alias for backward compatibility with YAML config
+    def add_row_loaded_date(self) -> "LinkedInProcessor":
+        """Alias for add_load_date() - creates both date columns."""
+        return self.add_load_date()
 
     def modify_name(self, columns: List[str]) -> "LinkedInProcessor":
         """Clean special characters and emojis from name columns.

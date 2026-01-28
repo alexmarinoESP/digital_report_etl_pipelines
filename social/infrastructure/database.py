@@ -122,7 +122,12 @@ class VerticaDataSink:
 
             # Get column order and types from database
             col_order = self._get_column_order(cursor, final_table_name)
+            logger.debug(f"Database column order: {col_order}")
+            logger.debug(f"'load_date' in DB columns: {'load_date' in col_order}")
+
             df = self._add_missing_columns(df, col_order)
+            logger.debug(f"DataFrame columns AFTER alignment: {list(df.columns)}")
+
             df = self._align_data_types(cursor, final_table_name, df)
 
             # DEBUG: Log DataFrame AFTER processing for placement table
@@ -291,10 +296,19 @@ class VerticaDataSink:
             List of column names in table order
         """
         cursor.execute(
-            "SELECT column_name FROM v_catalog.columns WHERE table_name = %s ORDER BY ordinal_position",
-            (table_name,)
+            "SELECT column_name FROM v_catalog.columns WHERE table_schema = %s AND table_name = %s ORDER BY ordinal_position",
+            (self.schema, table_name)
         )
-        return [row[0] for row in cursor.fetchall()]
+        columns = [row[0] for row in cursor.fetchall()]
+        logger.debug(f"Column order for {self.schema}.{table_name}: {columns}")
+
+        # CRITICAL: Check if load_date exists in database
+        if 'load_date' not in columns:
+            logger.warning(f"⚠️ load_date NOT in database table {self.schema}.{table_name}! Available columns: {columns}")
+        else:
+            logger.debug(f"✓ load_date found in database at position {columns.index('load_date')}")
+
+        return columns
 
     def _add_missing_columns(self, df: pd.DataFrame, col_order: List[str]) -> pd.DataFrame:
         """Add missing columns to DataFrame with default values.
@@ -311,8 +325,8 @@ class VerticaDataSink:
         if missing_cols:
             logger.debug(f"Adding missing columns: {missing_cols}")
             for col in missing_cols:
-                if col == "row_loaded_date":
-                    df[col] = datetime.datetime.now()
+                if col == "load_date":
+                    df[col] = datetime.date.today()
                 else:
                     df[col] = None
 
@@ -332,8 +346,8 @@ class VerticaDataSink:
         """
         # Get column data types from Vertica
         cursor.execute(
-            "SELECT column_name, data_type FROM v_catalog.columns WHERE table_name = %s",
-            (table_name,)
+            "SELECT column_name, data_type FROM v_catalog.columns WHERE table_schema = %s AND table_name = %s",
+            (self.schema, table_name)
         )
 
         column_types = pd.DataFrame(cursor.fetchall(), columns=["column_name", "data_type"])
@@ -698,9 +712,19 @@ class VerticaDataSink:
         df = df.replace({pd.NaT: None})
         df = df.where(pd.notna(df), None)
 
+        # DEBUG: Check load_date values
+        if 'load_date' in df.columns:
+            logger.debug(f"load_date dtype: {df['load_date'].dtype}")
+            logger.debug(f"load_date first 3 values: {df['load_date'].head(3).tolist()}")
+            logger.debug(f"load_date null count: {df['load_date'].isna().sum()}")
+
         # Build COPY statement
         columns_str = ",".join(df.columns)
         sql_query = f"COPY {self.schema}.{table_name} ({columns_str}) FROM STDIN null 'None' ABORT ON ERROR"
+
+        # DEBUG: Log the full COPY SQL to verify columns
+        logger.debug(f"COPY SQL: {sql_query}")
+        logger.debug(f"DataFrame columns for COPY: {list(df.columns)}")
 
         # Build data buffer with proper escaping
         buff = StringIO()
@@ -721,10 +745,24 @@ class VerticaDataSink:
 
             buff.write(row_format.format(*escaped_values))
 
+        # DEBUG: Log first row of data being sent
+        buff_preview = buff.getvalue()[:500] if buff.getvalue() else "EMPTY"
+        logger.debug(f"First row of COPY data: {buff_preview}")
+
         # Execute COPY
         try:
             cursor.copy(sql_query, buff.getvalue())
             cursor.execute("COMMIT")
+
+            # DEBUG: Verify data was written with load_date
+            if 'load_date' in df.columns and 'creative_id' in df.columns:
+                first_id = df['creative_id'].iloc[0]
+                verify_query = f"SELECT creative_id, load_date, row_loaded_date FROM {self.schema}.{table_name} WHERE creative_id = {first_id} LIMIT 1"
+                cursor.execute(verify_query)
+                result = cursor.fetchone()
+                logger.debug(f"VERIFY after COPY: {verify_query}")
+                logger.debug(f"VERIFY result: {result}")
+
             return len(df)
 
         except Exception as e:
@@ -899,8 +937,17 @@ class VerticaDataSink:
         """
         # Build UPDATE query with incremental SET clauses
         set_clauses = [f"{col} = {col} + %s" for col in increment_columns]
+
+        # Also update load_date and row_loaded_date if present in DataFrame
+        date_columns = []
+        if "load_date" in df.columns:
+            set_clauses.append("load_date = %s")
+            date_columns.append("load_date")
+        if "row_loaded_date" in df.columns:
+            set_clauses.append("row_loaded_date = %s")
+            date_columns.append("row_loaded_date")
+
         set_clause = ", ".join(set_clauses)
-        # Note: load_date is updated in the DataFrame before increment operation
 
         where_clauses = [f"{col} = %s" for col in pk_columns]
         where_clause = " AND ".join(where_clauses)
@@ -911,12 +958,15 @@ class VerticaDataSink:
             WHERE {where_clause}
         """
 
-        # Prepare batch data: (increment_values..., pk_values...)
+        # Prepare batch data: (increment_values..., date_values..., pk_values...)
         batch_data = []
         for _, row in df.iterrows():
             # First: values to increment
             values = [row[col] for col in increment_columns]
-            # Then: PK values for WHERE clause
+            # Then: date values
+            for col in date_columns:
+                values.append(row[col])
+            # Finally: PK values for WHERE clause
             values.extend([row[col] for col in pk_columns])
             batch_data.append(tuple(values))
 
