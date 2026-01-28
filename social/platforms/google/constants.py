@@ -25,7 +25,7 @@ COMPANY_ACCOUNT_MAP: Dict[str, int] = {
 # API Configuration
 # ============================================================================
 
-API_VERSION: str = "v19"
+API_VERSION: str = "v18"
 DEFAULT_LOOKBACK_DAYS: int = 150
 MICROS_DIVISOR: int = 1_000_000  # Google Ads costs are in micros (1/1,000,000 of currency)
 
@@ -58,7 +58,7 @@ GAQL_QUERIES: Dict[str, str] = {
         WHERE segments.date BETWEEN '{}' AND '{}'
     """,
 
-    # Ad report query - performance metrics
+    # Ad report query - performance metrics (with date filter for daily data)
     "query_ad_report": """
         SELECT metrics.clicks, metrics.conversions,
         metrics.average_cpc, metrics.average_cost,
@@ -67,6 +67,16 @@ GAQL_QUERIES: Dict[str, str] = {
         metrics.ctr, segments.date, customer.id
         FROM ad_group_ad
         WHERE segments.date BETWEEN '{}' AND '{}'
+    """,
+
+    # Ad report query - lifetime aggregated metrics (no date filter)
+    "query_ad_report_lifetime": """
+        SELECT metrics.clicks, metrics.conversions,
+        metrics.average_cpc, metrics.average_cost,
+        metrics.average_cpm, metrics.impressions, metrics.cost_micros,
+        ad_group_ad.ad.id, ad_group.id, campaign.id,
+        metrics.ctr, customer.id
+        FROM ad_group_ad
     """,
 
     # Ad creatives query - creative details
@@ -78,13 +88,13 @@ GAQL_QUERIES: Dict[str, str] = {
         customer.id FROM ad_group_ad
     """,
 
-    # Placement query - for ENABLED campaigns
+    # Placement query - for ENDED/SERVING campaigns (matches old production)
     "query_placement": """
-        SELECT group_placement_view.resource_name,
-        group_placement_view.placement,
+        SELECT group_placement_view.placement,
         group_placement_view.placement_type,
         group_placement_view.display_name,
         group_placement_view.target_url,
+        ad_group.id,
         metrics.impressions,
         metrics.active_view_ctr,
         customer.id
@@ -96,11 +106,11 @@ GAQL_QUERIES: Dict[str, str] = {
 
     # Placement query - for PAUSED campaigns
     "query_placement_2": """
-        SELECT group_placement_view.resource_name,
-        group_placement_view.placement,
+        SELECT group_placement_view.placement,
         group_placement_view.placement_type,
         group_placement_view.display_name,
         group_placement_view.target_url,
+        ad_group.id,
         metrics.impressions,
         metrics.active_view_ctr,
         customer.id
@@ -181,6 +191,7 @@ COLUMN_MAPPINGS: Dict[str, str] = {
     # Ad Group fields
     "ad_group.id": "adgroup_id",
     "adGroup.id": "adgroup_id",
+    "id": "id",  # Keep 'id' as 'id' for placement table (after handle_columns, adGroup.id becomes 'id')
 
     # Ad fields
     "ad_group_ad.ad.id": "ad_id",

@@ -54,7 +54,10 @@
       "Bash(Select-String -Pattern \"(FAIL|ERROR|OK|SUCCESS|placement|id|Columns in DataFrame)\")",
       "Bash(del test_placement.py)",
       "Bash(Select-String -Pattern \"(FAIL|ERROR|OK|SUCCESS|Fetching|Processing|WARNING.*resource_name|WARNING.*placement|id|columns)\")",
-      "Bash(del debug_placement.py debug_google_api_placement.py)"
+      "Bash(del debug_placement.py debug_google_api_placement.py)",
+      "Bash(Select-String -Pattern \"(FAIL|ERROR|OK|SUCCESS|Fetching|Processing|drop_duplicates|Dropped|rows)\")",
+      "Bash(Select-String -Pattern \"(FAIL|ERROR|OK|SUCCESS|append mode|PK=|Deduplication|new rows|Duplicate key|pk_columns)\")",
+      "Bash(Select-Object -First 40)"
     ]
   }
 }

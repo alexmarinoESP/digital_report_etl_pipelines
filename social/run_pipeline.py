@@ -441,10 +441,24 @@ class SocialPipeline:
                         # Legacy format uses 'fields_id', new format uses 'pk_columns'
                         pk_cols = ups_cfg.get("pk_columns") or ups_cfg.get("fields_id")
                         load_params["dedupe_columns"] = pk_cols
+                    elif load_mode == "append":
+                        # APPEND mode with explicit PK columns for deduplication
+                        append_cfg = table_config.get("append", {})
+                        pk_cols = append_cfg.get("pk_columns")
+                        if pk_cols:
+                            load_params["dedupe_columns"] = pk_cols
+                            logger.debug(f"APPEND mode using PK columns: {pk_cols}")
 
                     loaded_count = self.data_sink.load(**load_params)
                     logger.info(f"✓ Loaded {loaded_count} rows to {table_name}")
                     row_count = loaded_count
+
+                    # Post-processing: aggregate_to_target
+                    if load_mode == "upsert":
+                        ups_cfg = table_config.get("upsert", {})
+                        if ups_cfg.get("aggregate_to_target"):
+                            logger.info(f"Aggregating {table_name}_source → {table_name}...")
+                            self._aggregate_source_to_target(table_name)
 
                 results[table_name] = row_count
 
@@ -454,7 +468,89 @@ class SocialPipeline:
 
         return results
 
-# Helper method to add after _run_platform, before cleanup
+    def _aggregate_source_to_target(self, table_name: str) -> None:
+        """Aggregate data from _source table to target table.
+
+        Used for tables like google_ads_report where:
+        - _source table has daily data with (campaign_id, adgroup_id, ad_id, date) PK
+        - target table has aggregated data with (campaign_id, adgroup_id, ad_id) PK
+
+        Args:
+            table_name: Base table name (e.g., "google_ads_report")
+        """
+        suffix = "_TEST" if self.config.test_mode else ""
+        source_table = f"{table_name}{suffix}_source"
+        target_table = f"{table_name}{suffix}"
+
+        try:
+            # SQL to aggregate from source to target
+            aggregate_query = f"""
+                TRUNCATE TABLE GoogleAnalytics.{target_table};
+
+                INSERT INTO GoogleAnalytics.{target_table} (
+                    campaign_id,
+                    adgroup_id,
+                    ad_id,
+                    clicks,
+                    impressions,
+                    conversions,
+                    costmicros,
+                    averagecpm,
+                    averagecpc,
+                    averagecost,
+                    ctr,
+                    customer_id_google,
+                    load_date
+                )
+                SELECT
+                    campaign_id,
+                    adgroup_id,
+                    ad_id,
+                    SUM(clicks) as clicks,
+                    SUM(impressions) as impressions,
+                    SUM(conversions) as conversions,
+                    SUM(costmicros) as costmicros,
+                    -- Recalculate averages
+                    CASE WHEN SUM(impressions) > 0
+                        THEN (SUM(costmicros) / SUM(impressions)) * 1000
+                        ELSE 0
+                    END as averagecpm,
+                    CASE WHEN SUM(clicks) > 0
+                        THEN SUM(costmicros) / SUM(clicks)
+                        ELSE 0
+                    END as averagecpc,
+                    CASE WHEN SUM(clicks) > 0
+                        THEN SUM(costmicros) / SUM(clicks)
+                        ELSE 0
+                    END as averagecost,
+                    CASE WHEN SUM(impressions) > 0
+                        THEN (SUM(clicks)::FLOAT / SUM(impressions)) * 100
+                        ELSE 0
+                    END as ctr,
+                    MAX(customer_id_google) as customer_id_google,
+                    CURRENT_DATE as load_date
+                FROM GoogleAnalytics.{source_table}
+                GROUP BY campaign_id, adgroup_id, ad_id
+            """
+
+            conn = self.data_sink._get_connection()
+            cursor = conn.cursor()
+            try:
+                logger.debug(f"Executing aggregation: {source_table} → {target_table}")
+                cursor.execute(aggregate_query)
+                conn.commit()
+
+                # Get row count
+                cursor.execute(f"SELECT COUNT(*) FROM GoogleAnalytics.{target_table}")
+                row_count = cursor.fetchone()[0]
+                logger.success(f"✓ Aggregated {row_count} rows from {source_table} to {target_table}")
+            finally:
+                cursor.close()
+                conn.close()
+
+        except Exception as e:
+            logger.error(f"Failed to aggregate {source_table} → {target_table}: {e}")
+            raise
 
     def _determine_load_mode(self, table_config: Dict[str, Any], table_name: str) -> str:
         """Determine load mode from table configuration.

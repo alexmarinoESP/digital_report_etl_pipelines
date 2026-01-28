@@ -230,13 +230,7 @@ class GoogleAdapter:
         Raises:
             APIError: If extraction fails
         """
-        logger.info("Fetching ad report for all customer accounts")
-
-        # Calculate date range
-        if end_date is None:
-            end_date = datetime.now()
-        if start_date is None:
-            start_date = end_date - timedelta(days=DEFAULT_LOOKBACK_DAYS)
+        logger.info("Fetching ad report (daily data with date dimension)")
 
         # Get enabled customer accounts
         accounts = self._get_enabled_customer_accounts()
@@ -245,14 +239,16 @@ class GoogleAdapter:
             logger.warning("No enabled customer accounts found")
             return pd.DataFrame()
 
-        # Execute query for each account
-        all_data = []
-        query_template = GAQL_QUERIES["query_ad_report"]
-        query = query_template.format(
+        # Use DAILY query (WITH segments.date) to get daily breakdown
+        query = GAQL_QUERIES["query_ad_report"].format(
             start_date.strftime("%Y-%m-%d"),
-            end_date.strftime("%Y-%m-%d"),
+            end_date.strftime("%Y-%m-%d")
         )
 
+        logger.debug(f"Using daily query from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+
+        # Execute query for each account
+        all_data = []
         for _, account in accounts.iterrows():
             customer_id = str(account["id"])
             account_name = account.get("descriptiveName", "Unknown")
@@ -268,20 +264,23 @@ class GoogleAdapter:
 
                 if not df.empty:
                     all_data.append(df)
-                    logger.debug(f"Retrieved {len(df)} ad metrics from {account_name}")
+                    logger.debug(f"Retrieved {len(df)} daily ad metrics from {account_name}")
 
             except Exception as e:
                 logger.warning(f"Failed to query account {customer_id}: {str(e)}")
                 continue
 
         # Combine all results
-        if all_data:
-            combined_df = pd.concat(all_data, ignore_index=True)
-            logger.success(f"Retrieved {len(combined_df)} total ad metrics")
-            return combined_df
-        else:
+        if not all_data:
             logger.warning("No ad report data retrieved")
             return pd.DataFrame()
+
+        combined_df = pd.concat(all_data, ignore_index=True)
+        logger.success(f"Retrieved {len(combined_df)} total daily ad metrics rows (with date dimension)")
+
+        # Return daily data WITHOUT aggregation
+        # Aggregation will be done in separate table via SQL
+        return combined_df
 
     def get_all_ad_creatives(self) -> pd.DataFrame:
         """

@@ -97,12 +97,17 @@ class GoogleProcessor:
             # 2. Replace remaining dots with underscores
             self.df.columns = [col.replace(".", "_") for col in self.df.columns]
 
-            # 3. Remove 'resource' columns (except resource_name which is needed for placement)
-            cols_to_keep = [col for col in self.df.columns if "resource" not in col.lower() or "resource_name" in col.lower()]
+            # 3. Remove 'resource' columns completely (we don't need them after ad_group.id is present)
+            cols_to_keep = [col for col in self.df.columns if "resource" not in col.lower()]
             self.df = self.df[cols_to_keep]
 
             # 4. Convert to lowercase
             self.df.columns = [col.lower() for col in self.df.columns]
+
+            # 5. Remove duplicate column names (keep first occurrence)
+            if self.df.columns.duplicated().any():
+                logger.warning(f"Found duplicate column names: {self.df.columns[self.df.columns.duplicated()].tolist()}")
+                self.df = self.df.loc[:, ~self.df.columns.duplicated()]
 
             logger.debug(f"handle_columns AFTER: {self.df.columns.tolist()}")
             logger.debug(f"Cleaned {len(self.df.columns)} Google Ads column names")
@@ -376,14 +381,17 @@ class GoogleProcessor:
 
         return self
 
-    def aggregate_by_keys(self) -> "GoogleProcessor":
+    def aggregate_by_keys(self, group_by: Optional[List[str]] = None) -> "GoogleProcessor":
         """
-        Aggregate Google Ads data by device (ad_id + device).
+        Aggregate Google Ads data by specified keys.
 
         CRITICAL FIX: Removes duplicates BEFORE aggregation to prevent
         double-counting when campaigns are both SERVING and PAUSED.
 
-        Sums cost_micros and clicks for each ad_id + device combination.
+        Sums numeric metrics for each key combination.
+
+        Args:
+            group_by: List of columns to group by (default: ["ad_id", "device"])
 
         Returns:
             Self for chaining
@@ -391,9 +399,13 @@ class GoogleProcessor:
         if self.df.empty:
             return self
 
-        required_cols = ["ad_id", "device"]
-        if not all(col in self.df.columns for col in required_cols):
-            logger.warning("Missing required columns for aggregation, skipping")
+        # Default to ad_id + device for backward compatibility
+        group_by = group_by or ["ad_id", "device"]
+
+        # Check if all group_by columns exist
+        if not all(col in self.df.columns for col in group_by):
+            missing = [col for col in group_by if col not in self.df.columns]
+            logger.warning(f"Missing required columns for aggregation: {missing}, skipping")
             return self
 
         try:
@@ -401,34 +413,63 @@ class GoogleProcessor:
             # When campaigns are both SERVING and PAUSED, both queries return same data
             initial_rows = len(self.df)
             self.df = self.df.drop_duplicates(
-                subset=["ad_id", "device"],
+                subset=group_by,
                 keep="first"  # Keep first occurrence (SERVING has priority)
             )
             final_rows = len(self.df)
 
             if initial_rows != final_rows:
-                logger.warning(f"Removed {initial_rows - final_rows} duplicate ad_id/device combinations")
+                logger.warning(f"Removed {initial_rows - final_rows} duplicate combinations for {group_by}")
                 logger.warning("This prevents incorrect summing when campaigns are both SERVING and PAUSED")
 
-            # Convert cost_micros to float to prevent overflow
-            if "cost_micros" in self.df.columns:
-                self.df["cost_micros"] = self.df["cost_micros"].astype(float)
-
+            # Build aggregation dict for numeric columns
             agg_dict = {}
-            if "cost_micros" in self.df.columns:
-                agg_dict["cost_micros"] = "sum"
-            if "clicks" in self.df.columns:
-                agg_dict["clicks"] = "sum"
 
-            # Add customer_id if it exists
-            if "customer_id" in self.df.columns:
-                agg_dict["customer_id"] = "first"
-            elif "customer_id_google" in self.df.columns:
-                agg_dict["customer_id_google"] = "first"
+            # Metrics to sum (base metrics only, not averages)
+            sum_columns = ["cost_micros", "clicks", "impressions", "conversions"]
+            for col in sum_columns:
+                if col in self.df.columns:
+                    # Convert to float to prevent overflow
+                    self.df[col] = pd.to_numeric(self.df[col], errors='coerce')
+                    agg_dict[col] = "sum"
+
+            # ID columns - take first
+            id_columns = ["customer_id", "customer_id_google"]
+            for col in id_columns:
+                if col in self.df.columns and col not in group_by:
+                    agg_dict[col] = "first"
 
             if agg_dict:
-                self.df = self.df.groupby(["ad_id", "device"], as_index=False).agg(agg_dict)
-                logger.debug(f"Aggregated to {len(self.df)} unique ad_id/device combinations")
+                self.df = self.df.groupby(group_by, as_index=False).agg(agg_dict)
+                logger.debug(f"Aggregated to {len(self.df)} unique {'/'.join(group_by)} combinations")
+
+                # Recalculate averages AFTER aggregation
+                # CPC = cost / clicks
+                if "cost_micros" in self.df.columns and "clicks" in self.df.columns:
+                    self.df["averagecpc"] = self.df.apply(
+                        lambda row: row["cost_micros"] / row["clicks"] if row["clicks"] > 0 else 0,
+                        axis=1
+                    )
+
+                # CPM = (cost / impressions) * 1000
+                if "cost_micros" in self.df.columns and "impressions" in self.df.columns:
+                    self.df["averagecpm"] = self.df.apply(
+                        lambda row: (row["cost_micros"] / row["impressions"]) * 1000 if row["impressions"] > 0 else 0,
+                        axis=1
+                    )
+
+                # Average cost = cost_micros (already aggregated)
+                if "cost_micros" in self.df.columns:
+                    self.df["averagecost"] = self.df["cost_micros"]
+
+                # CTR = (clicks / impressions) * 100
+                if "clicks" in self.df.columns and "impressions" in self.df.columns:
+                    self.df["ctr"] = self.df.apply(
+                        lambda row: (row["clicks"] / row["impressions"]) * 100 if row["impressions"] > 0 else 0,
+                        axis=1
+                    )
+
+                logger.debug("Recalculated average metrics (CPC, CPM, CTR) after aggregation")
         except Exception as e:
             logger.warning(f"Failed to aggregate by keys: {e}")
 
@@ -518,6 +559,9 @@ class GoogleProcessor:
         if self.df.empty:
             return self
 
+        # DEBUG
+        logger.warning(f"dropna_value BEFORE: columns={self.df.columns.tolist()}, 'id' present={'id' in self.df.columns}")
+
         original_count = len(self.df)
 
         # Log columns with NaN values BEFORE dropping
@@ -534,11 +578,18 @@ class GoogleProcessor:
         if dropped > 0:
             logger.debug(f"Dropped {dropped} rows with NaN values")
 
+        # DEBUG
+        logger.warning(f"dropna_value AFTER: columns={self.df.columns.tolist()}, 'id' present={'id' in self.df.columns}")
+
         return self
 
-    def drop_duplicates(self) -> "GoogleProcessor":
+    def drop_duplicates(self, subset: Optional[List[str]] = None) -> "GoogleProcessor":
         """
         Drop duplicate rows.
+
+        Args:
+            subset: Column names to consider for identifying duplicates.
+                   If None, considers all columns.
 
         Returns:
             Self for chaining
@@ -547,11 +598,19 @@ class GoogleProcessor:
             return self
 
         original_count = len(self.df)
-        self.df = self.df.drop_duplicates()
-        dropped = original_count - len(self.df)
 
-        if dropped > 0:
-            logger.debug(f"Dropped {dropped} duplicate rows")
+        if subset:
+            # Drop duplicates on specific columns, keep last occurrence
+            self.df = self.df.drop_duplicates(subset=subset, keep='last')
+            dropped = original_count - len(self.df)
+            if dropped > 0:
+                logger.debug(f"Dropped {dropped} duplicate rows on columns {subset}")
+        else:
+            # Drop exact duplicates (all columns)
+            self.df = self.df.drop_duplicates()
+            dropped = original_count - len(self.df)
+            if dropped > 0:
+                logger.debug(f"Dropped {dropped} duplicate rows")
 
         return self
 
@@ -635,6 +694,11 @@ class GoogleProcessor:
 
         from social.platforms.google.constants import COLUMN_MAPPINGS
 
+        # DEBUG: Log columns before rename
+        logger.warning(f"google_rename_columns BEFORE: {self.df.columns.tolist()}")
+        if 'id' in self.df.columns:
+            logger.warning(f"'id' column present BEFORE rename, sample: {self.df['id'].head(3).tolist()}")
+
         # Only rename columns that exist
         valid_renames = {
             old: new for old, new in COLUMN_MAPPINGS.items()
@@ -642,8 +706,16 @@ class GoogleProcessor:
         }
 
         if valid_renames:
+            logger.warning(f"Applying renames: {valid_renames}")
             self.df = self.df.rename(columns=valid_renames)
             logger.debug(f"Renamed {len(valid_renames)} Google Ads columns")
+
+        # DEBUG: Log columns after rename
+        logger.warning(f"google_rename_columns AFTER: {self.df.columns.tolist()}")
+        if 'id' in self.df.columns:
+            logger.warning(f"'id' column present AFTER rename, sample: {self.df['id'].head(3).tolist()}")
+        else:
+            logger.error("'id' column MISSING after rename!")
 
         return self
 
@@ -651,8 +723,11 @@ class GoogleProcessor:
         """
         Extract ad group ID from resource_name and create 'id' column.
 
-        Resource name format: customers/{customer_id}/adGroups/{ad_group_id}~{criterion_id}
-        or customers/{customer_id}/adGroups/{ad_group_id}
+        For group_placement_view, resource name format is:
+            customers/{customer_id}/groupPlacementViews/{ad_group_id}~{encoded_placement}
+
+        For other resources, format can be:
+            customers/{customer_id}/adGroups/{ad_group_id}~{criterion_id}
 
         Returns:
             Self for chaining
@@ -660,16 +735,29 @@ class GoogleProcessor:
         if self.df.empty:
             return self
 
-        if "resource_name" not in self.df.columns:
-            logger.warning("Missing 'resource_name' column, cannot extract id")
+        # Try both 'resource_name' and 'resourcename' (after handle_columns processing)
+        resource_col = None
+        if "resource_name" in self.df.columns:
+            resource_col = "resource_name"
+        elif "resourcename" in self.df.columns:
+            resource_col = "resourcename"
+
+        if not resource_col:
+            logger.warning("Missing 'resource_name' or 'resourcename' column, cannot extract id")
             return self
 
         try:
-            # Extract ad group ID from resource_name
-            # Format: customers/XXX/adGroups/YYY or customers/XXX/adGroups/YYY~ZZZ
-            self.df["id"] = self.df["resource_name"].str.extract(r"/adGroups/(\d+)")[0]
+            # Try extracting from groupPlacementViews format first
+            # Format: customers/XXX/groupPlacementViews/YYY~ZZZ
+            extracted = self.df[resource_col].str.extract(r"/groupPlacementViews/(\d+)")[0]
 
-            logger.debug("Extracted ad group ID from resource_name")
+            # If not found, try ad_groups format
+            # Format: customers/XXX/adGroups/YYY or customers/XXX/adGroups/YYY~ZZZ
+            if extracted.isna().all():
+                extracted = self.df[resource_col].str.extract(r"/adGroups/(\d+)")[0]
+
+            self.df["id"] = extracted
+            logger.debug(f"Extracted ad group ID from {resource_col} ({extracted.notna().sum()} values)")
 
         except Exception as e:
             logger.warning(f"Failed to extract ID from resource_name: {e}")
@@ -686,22 +774,24 @@ class GoogleProcessor:
         if self.df.empty:
             return self
 
+        # DEBUG
+        logger.warning(f"limit_placement BEFORE: columns={self.df.columns.tolist()}, 'id' present={'id' in self.df.columns}")
+
         if "impressions" not in self.df.columns or "id" not in self.df.columns:
             logger.warning("Missing required columns for placement limit, skipping")
+            logger.warning(f"limit_placement AFTER (skipped): columns={self.df.columns.tolist()}")
             return self
 
         try:
             # Convert impressions to int
             self.df["impressions"] = self.df["impressions"].astype(int)
 
-            # Group by ad group ID, sort by impressions, take top 25
-            self.df = (
-                self.df.groupby(["id"])
-                .apply(lambda x: x.sort_values(by="impressions", ascending=False).head(25))
-                .reset_index(drop=True)
-            )
+            # Sort by id and impressions, then keep top 25 per id
+            self.df = self.df.sort_values(by=["id", "impressions"], ascending=[True, False])
+            self.df = self.df.groupby("id").head(25).reset_index(drop=True)
 
             logger.debug("Limited placements to top 25 per ad group")
+            logger.warning(f"limit_placement AFTER: columns={self.df.columns.tolist()}, 'id' present={'id' in self.df.columns}")
 
         except Exception as e:
             logger.warning(f"Failed to limit placements: {e}")
@@ -715,6 +805,13 @@ class GoogleProcessor:
         Returns:
             Processed DataFrame
         """
+        # DEBUG: Log final DataFrame state
+        logger.warning(f"get_df() returning DataFrame with columns: {self.df.columns.tolist()}")
+        if 'id' in self.df.columns:
+            logger.warning(f"get_df() 'id' column present, sample: {self.df['id'].head(3).tolist()}")
+        else:
+            logger.error("get_df() 'id' column MISSING!")
+
         return self.df
 
     # ============================================================================

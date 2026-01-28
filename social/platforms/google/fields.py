@@ -64,7 +64,6 @@ SELECT
     group_placement_view.target_url,
     metrics.impressions,
     metrics.active_view_ctr,
-    segments.date,
     customer.id
 FROM group_placement_view
 WHERE segments.date BETWEEN '{}' AND '{}'
@@ -80,7 +79,6 @@ SELECT
     group_placement_view.target_url,
     metrics.impressions,
     metrics.active_view_ctr,
-    segments.date,
     customer.id
 FROM group_placement_view
 WHERE segments.date BETWEEN '{}' AND '{}'

@@ -257,7 +257,7 @@ class FacebookProcessor:
         return self
 
     def add_row_loaded_date(self, **kwargs) -> "FacebookProcessor":
-        """Add row_loaded_date column with current timestamp.
+        """Add load_date column with current date (not timestamp).
 
         Args:
             **kwargs: Ignored for compatibility with YAML config (params: None)
@@ -268,8 +268,8 @@ class FacebookProcessor:
         if self.df.empty:
             return self
 
-        self.df["row_loaded_date"] = datetime.now()
-        logger.debug("Added row_loaded_date column")
+        self.df["load_date"] = datetime.now().date()
+        logger.debug("Added load_date column")
         return self
 
     def fix_id_type(self, columns: List[str]) -> "FacebookProcessor":

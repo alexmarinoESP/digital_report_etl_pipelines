@@ -3,18 +3,23 @@ platform:
   api_version: "v19.0"
 
 fb_ads_audience_adset:
-  type: get_ad_sets
+  type: get_audience_targeting  # Use special adapter method that extracts audiences
   date_preset:  last_7d
   fields: fields_ads_audience_adset
   processing:
+    modify_name:
+      cols: ['name']  # Audience name from API
     add_row_loaded_date:
       params: None
-    modify_name:
-      cols: ['name']
 
   scope: account
   query:
     column_name:
+      - audience_id
+      - adset_id
+  # APPEND mode with explicit PK
+  append:
+    pk_columns:
       - audience_id
       - adset_id
   delete:
@@ -51,7 +56,7 @@ fb_ads_insight:
       cols: ['ad_name', 'name']
     drop_columns:
       cols: ['date_stop','date_start']
-    aggregate_by_entity:  # NEW: Aggregate metrics
+    aggregate_by_entity:  # Aggregate metrics by ad_id (remove date dimension)
       group_columns: null  # Auto-detect (ad_id)
       metric_columns: null
       agg_method: 'sum'
@@ -61,19 +66,9 @@ fb_ads_insight:
   query:
     column_name:
       - ad_id  # Only ad_id, no dates
-  increment:  # Changed from 'merge'
+  upsert:  # UPSERT = MERGE (replace values, don't increment)
     pk_columns:
       - ad_id
-    increment_columns:
-      - reach
-      - inline_link_clicks
-      - inline_link_click_ctr
-      - cpc
-      - cpm
-      - impressions
-      - spend
-      - ctr
-      - clicks
   scope: account
 
 
@@ -88,7 +83,7 @@ fb_ads_insight_actions:
       params: None
     nan_conversion:
       params: None
-    aggregate_by_entity:  # NEW: Aggregate metrics by ad_id + action_type
+    aggregate_by_entity:  # Aggregate metrics by ad_id + action_type
       group_columns: ['ad_id', 'action_type']  # Explicit grouping
       metric_columns: ['value']
       agg_method: 'sum'
@@ -100,12 +95,10 @@ fb_ads_insight_actions:
       - ad_id
       - action_type
   scope: account
-  increment:  # Changed from 'merge'
+  upsert:  # UPSERT = MERGE (replace values, don't increment)
     pk_columns:
       - ad_id
       - action_type
-    increment_columns:
-      - value
 #
 #
 ##fb_ads_ad_creatives:
@@ -164,6 +157,10 @@ fb_ads_custom_conversion:
 
   query:
     column_name:
+      - conversion_id
+  # APPEND mode with explicit PK
+  append:
+    pk_columns:
       - conversion_id
   scope: account
 

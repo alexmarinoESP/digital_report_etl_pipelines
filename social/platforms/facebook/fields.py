@@ -66,6 +66,7 @@ fields_ads_adset = [
 
 fields_ads_audience_adset = [
     AdSet.Field.id,
+    AdSet.Field.name,
     AdSet.Field.campaign_id,
     AdSet.Field.targeting,
 ]

@@ -110,10 +110,31 @@ class VerticaDataSink:
         try:
             cursor = self._get_cursor()
 
+            # DEBUG: Log DataFrame BEFORE any processing for placement table
+            if 'placement' in table_name.lower():
+                logger.warning(f"DEBUG BEFORE processing - DataFrame columns: {df.columns.tolist()}")
+                if 'id' in df.columns:
+                    id_sample = df['id'].head(5).tolist()
+                    null_count = df['id'].isna().sum()
+                    logger.warning(f"DEBUG BEFORE - 'id' sample: {id_sample}, nulls: {null_count}/{len(df)}")
+                else:
+                    logger.error("DEBUG BEFORE - 'id' column MISSING!")
+
             # Get column order and types from database
             col_order = self._get_column_order(cursor, final_table_name)
             df = self._add_missing_columns(df, col_order)
             df = self._align_data_types(cursor, final_table_name, df)
+
+            # DEBUG: Log DataFrame AFTER processing for placement table
+            if 'placement' in table_name.lower():
+                logger.warning(f"DEBUG AFTER processing - DataFrame columns: {df.columns.tolist()}")
+                if 'id' in df.columns:
+                    id_sample = df['id'].head(5).tolist()
+                    null_count = df['id'].isna().sum()
+                    logger.warning(f"DEBUG AFTER - 'id' sample: {id_sample}, nulls: {null_count}/{len(df)}")
+                    logger.warning(f"DEBUG AFTER - DataFrame sample:\n{df[['id', 'placement']].head(3).to_string()}")
+                else:
+                    logger.error("DEBUG AFTER - 'id' column MISSING!")
 
             # STEP 1: Remove duplicates WITHIN the DataFrame itself
             initial_rows = len(df)
@@ -534,7 +555,7 @@ class VerticaDataSink:
             update_columns = [
                 col for col in all_columns
                 if col not in pk_columns
-                and col not in ["row_loaded_date", "last_updated_date"]
+                and col not in ["load_date", "last_updated_date"]
             ]
 
             if not update_columns:
@@ -649,7 +670,7 @@ class VerticaDataSink:
         # Fallback: use all columns except metadata
         pk_candidates = [
             col for col in df.columns
-            if col not in ["row_loaded_date", "last_updated_date"]
+            if col not in ["load_date", "last_updated_date"]
         ]
         logger.warning(f"No standard PK detected, using all {len(pk_candidates)} columns")
 

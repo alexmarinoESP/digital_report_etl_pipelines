@@ -452,10 +452,17 @@ class GooglePipeline:
                 load_mode = "upsert"
                 logger.debug(f"Using upsert mode for {table_name} (legacy 'merge' config)")
 
+            elif table_config.get("append"):
+                # APPEND mode with explicit PK columns
+                load_mode = "append"
+                append_config = table_config["append"]
+                pk_columns = append_config.get("pk_columns")
+                logger.debug(f"Using append mode for {table_name} with PK={pk_columns}")
+
             else:
                 # Default: APPEND (insert only new rows, skip duplicates)
                 load_mode = "append"
-                logger.debug(f"Using append mode for {table_name}")
+                logger.debug(f"Using append mode for {table_name} (no PK specified)")
 
             # Check if sink has write_dataframe method (Vertica style)
             if hasattr(self.data_sink, "write_dataframe"):

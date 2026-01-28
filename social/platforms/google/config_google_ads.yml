@@ -3,7 +3,7 @@
 # The api_base_url is not used but required by BaseAdsPlatformAdapter validation
 platform:
   api_base_url: "https://googleads.googleapis.com"  # Not actually used (gRPC)
-  api_version: "v19"
+  api_version: "v18"
 
 google_ads_violation:
   queryget: [query_violation_policy]
@@ -69,6 +69,9 @@ google_ads_ad_creatives:
       params: None
     handle_columns:
       params: None
+    drop_duplicates:
+      params:
+        subset: ['ad_id', 'adgroup_id']
     add_load_date:
       params: None
   scope: GoogleAdsService
@@ -76,7 +79,11 @@ google_ads_ad_creatives:
     column_name:
       - ad_id
       - adgroup_id
-  # Uses APPEND mode: insert only new rows based on pk_columns
+  # APPEND mode: insert only new rows, skip existing based on PK
+  append:
+    pk_columns:
+      - ad_id
+      - adgroup_id
 #
 #
 google_ads_campaign:
@@ -118,7 +125,7 @@ google_ads_campaign:
       - name
 #
 google_ads_report:
-  queryget: [query_ad_report]
+  queryget: [query_ad_report]  # Use daily query (WITH segments.date)
   type: SearchGoogleAdsStreamRequest
   processing:
     google_rename_columns:
@@ -127,35 +134,25 @@ google_ads_report:
       params: None
     convert_costs:
       col: ['cost_micros','costmicros','averagecpm','averagecost','averagecpc']
-    aggregate_by_entity:  # NEW: Aggregate metrics
-      group_columns: ['campaign_id', 'adgroup_id', 'ad_id']
-      metric_columns: null
-      agg_method: 'sum'
+    add_load_date:
+      params: None
     dropna_value:
       params: None
-    add_row_loaded_date:
-      params: None
   scope: account
-  day: 150
+  day: 730  # Fetch last 2 years (730 days) of daily data
   query:
     column_name:
       - campaign_id
       - adgroup_id
       - ad_id
-  increment:  # Changed from 'merge'
+      - date
+  upsert:  # UPSERT daily data with date in PK (loads into google_ads_report_TEST_source)
     pk_columns:
       - campaign_id
       - adgroup_id
       - ad_id
-    increment_columns:
-      - clicks
-      - impressions
-      - conversions
-      - costmicros
-      - averagecpm
-      - averagecpc
-      - averagecost
-      - ctr
+      - date
+    aggregate_to_target: true  # After loading source, aggregate to target table
 ##
 ##
 ##
