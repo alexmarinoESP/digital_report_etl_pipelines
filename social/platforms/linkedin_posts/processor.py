@@ -401,7 +401,7 @@ class LinkedInPostsProcessor:
             Content type string
         """
         if not content:
-            return "NONE"
+            return "NO_CONTENT"
         if "multiImage" in content:
             return "MULTI_IMAGE"
         if "media" in content:
@@ -418,7 +418,7 @@ class LinkedInPostsProcessor:
             return "ARTICLE"
         if "poll" in content:
             return "POLL"
-        return "NONE"
+        return "NO_CONTENT"
 
     @staticmethod
     def _extract_media_url(content: Dict) -> str:
