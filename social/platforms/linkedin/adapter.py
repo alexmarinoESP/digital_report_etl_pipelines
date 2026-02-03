@@ -156,12 +156,12 @@ class LinkedInAdapter:
             fields_str = self.http_client.format_fields(fields)
 
             # Simple parameters that will be URL-encoded normally
-            # timeGranularity=ALL returns lifetime totals per creative (no daily breakdown)
-            # This avoids data duplication when calling API multiple times for overlapping periods
+            # timeGranularity=DAILY returns daily breakdown with date dimension
+            # This allows maintaining historical data in source table
             params = {
                 "q": "analytics",
                 "pivot": "CREATIVE",
-                "timeGranularity": "ALL",
+                "timeGranularity": "DAILY",
             }
 
             # Complex parameters must NOT be URL-encoded

@@ -471,67 +471,26 @@ class SocialPipeline:
     def _aggregate_source_to_target(self, table_name: str) -> None:
         """Aggregate data from _source table to target table.
 
-        Used for tables like google_ads_report where:
-        - _source table has daily data with (campaign_id, adgroup_id, ad_id, date) PK
-        - target table has aggregated data with (campaign_id, adgroup_id, ad_id) PK
+        Supports different aggregation strategies per table:
+        - google_ads_report: Aggregates by (campaign_id, adgroup_id, ad_id)
+        - linkedin_ads_insights: Aggregates by (creative_id)
 
         Args:
-            table_name: Base table name (e.g., "google_ads_report")
+            table_name: Base table name (e.g., "google_ads_report", "linkedin_ads_insights")
         """
         suffix = "_TEST" if self.config.test_mode else ""
         source_table = f"{table_name}{suffix}_source"
         target_table = f"{table_name}{suffix}"
 
         try:
-            # SQL to aggregate from source to target
-            aggregate_query = f"""
-                TRUNCATE TABLE GoogleAnalytics.{target_table};
-
-                INSERT INTO GoogleAnalytics.{target_table} (
-                    campaign_id,
-                    adgroup_id,
-                    ad_id,
-                    clicks,
-                    impressions,
-                    conversions,
-                    costmicros,
-                    averagecpm,
-                    averagecpc,
-                    averagecost,
-                    ctr,
-                    customer_id_google,
-                    load_date
-                )
-                SELECT
-                    campaign_id,
-                    adgroup_id,
-                    ad_id,
-                    SUM(clicks) as clicks,
-                    SUM(impressions) as impressions,
-                    SUM(conversions) as conversions,
-                    SUM(costmicros) as costmicros,
-                    -- Recalculate averages
-                    CASE WHEN SUM(impressions) > 0
-                        THEN (SUM(costmicros) / SUM(impressions)) * 1000
-                        ELSE 0
-                    END as averagecpm,
-                    CASE WHEN SUM(clicks) > 0
-                        THEN SUM(costmicros) / SUM(clicks)
-                        ELSE 0
-                    END as averagecpc,
-                    CASE WHEN SUM(clicks) > 0
-                        THEN SUM(costmicros) / SUM(clicks)
-                        ELSE 0
-                    END as averagecost,
-                    CASE WHEN SUM(impressions) > 0
-                        THEN (SUM(clicks)::FLOAT / SUM(impressions)) * 100
-                        ELSE 0
-                    END as ctr,
-                    MAX(customer_id_google) as customer_id_google,
-                    CURRENT_DATE as load_date
-                FROM GoogleAnalytics.{source_table}
-                GROUP BY campaign_id, adgroup_id, ad_id
-            """
+            # Generate table-specific aggregation query
+            if table_name == "google_ads_report":
+                aggregate_query = self._get_google_ads_aggregation_query(source_table, target_table)
+            elif table_name == "linkedin_ads_insights":
+                aggregate_query = self._get_linkedin_insights_aggregation_query(source_table, target_table)
+            else:
+                logger.warning(f"No aggregation query defined for {table_name}")
+                return
 
             conn = self.data_sink._get_connection()
             cursor = conn.cursor()
@@ -551,6 +510,78 @@ class SocialPipeline:
         except Exception as e:
             logger.error(f"Failed to aggregate {source_table} → {target_table}: {e}")
             raise
+
+    def _get_google_ads_aggregation_query(self, source_table: str, target_table: str) -> str:
+        """Generate Google Ads aggregation SQL query."""
+        return f"""
+            TRUNCATE TABLE GoogleAnalytics.{target_table};
+
+            INSERT INTO GoogleAnalytics.{target_table} (
+                campaign_id, adgroup_id, ad_id,
+                clicks, impressions, conversions, costmicros,
+                averagecpm, averagecpc, averagecost, ctr,
+                customer_id_google, load_date
+            )
+            SELECT
+                campaign_id, adgroup_id, ad_id,
+                SUM(clicks) as clicks,
+                SUM(impressions) as impressions,
+                SUM(conversions) as conversions,
+                SUM(costmicros) as costmicros,
+                CASE WHEN SUM(impressions) > 0
+                    THEN (SUM(costmicros) / SUM(impressions)) * 1000
+                    ELSE 0
+                END as averagecpm,
+                CASE WHEN SUM(clicks) > 0
+                    THEN SUM(costmicros) / SUM(clicks)
+                    ELSE 0
+                END as averagecpc,
+                CASE WHEN SUM(clicks) > 0
+                    THEN SUM(costmicros) / SUM(clicks)
+                    ELSE 0
+                END as averagecost,
+                CASE WHEN SUM(impressions) > 0
+                    THEN (SUM(clicks)::FLOAT / SUM(impressions)) * 100
+                    ELSE 0
+                END as ctr,
+                MAX(customer_id_google) as customer_id_google,
+                CURRENT_DATE as load_date
+            FROM GoogleAnalytics.{source_table}
+            GROUP BY campaign_id, adgroup_id, ad_id
+        """
+
+    def _get_linkedin_insights_aggregation_query(self, source_table: str, target_table: str) -> str:
+        """Generate LinkedIn Insights aggregation SQL query."""
+        return f"""
+            TRUNCATE TABLE GoogleAnalytics.{target_table};
+
+            INSERT INTO GoogleAnalytics.{target_table} (
+                creative_id,
+                actionClicks, adUnitClicks, clicks, comments,
+                costInLocalCurrency, landingPageClicks, likes,
+                reactions, shares, totalEngagements, impressions,
+                externalWebsiteConversions, conversionValueInLocalCurrency,
+                row_loaded_date
+            )
+            SELECT
+                creative_id,
+                SUM(actionClicks) as actionClicks,
+                SUM(adUnitClicks) as adUnitClicks,
+                SUM(clicks) as clicks,
+                SUM(comments) as comments,
+                SUM(costInLocalCurrency) as costInLocalCurrency,
+                SUM(landingPageClicks) as landingPageClicks,
+                SUM(likes) as likes,
+                SUM(reactions) as reactions,
+                SUM(shares) as shares,
+                SUM(totalEngagements) as totalEngagements,
+                SUM(impressions) as impressions,
+                SUM(externalWebsiteConversions) as externalWebsiteConversions,
+                SUM(conversionValueInLocalCurrency) as conversionValueInLocalCurrency,
+                CURRENT_DATE as row_loaded_date
+            FROM GoogleAnalytics.{source_table}
+            GROUP BY creative_id
+        """
 
     def _determine_load_mode(self, table_config: Dict[str, Any], table_name: str) -> str:
         """Determine load mode from table configuration.

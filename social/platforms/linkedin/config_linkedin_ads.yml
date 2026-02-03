@@ -73,20 +73,24 @@ linkedin_ads_insights:
   query:
     column_name:
       - creative_id
+      - date  # Add date to query columns (built from dateRange components)
   processing:
-    # Note: Using timeGranularity=ALL in API call, so no need to aggregate
-    # API returns lifetime totals per creative directly
+    # Note: Using timeGranularity=DAILY to get daily breakdown with date dimension
+    # This allows maintaining historical data in source table (730 days)
     replace_nan_with_zero:
       columns: ['costInLocalCurrency', 'conversionValueInLocalCurrency']
     response_decoration:
       field: pivotValues
       new_col_name: creative_id
+    build_date_field: None  # Build 'date' column from dateRange_start_year/month/day
     add_row_loaded_date: None
-  # UPSERT: Each call overwrites with latest lifetime totals from API
-  # No risk of data duplication since API returns aggregated totals
+  # UPSERT: Loads daily data into _source table with date in PK
+  # Then aggregates all historical data from _source to target table
   upsert:
     pk_columns:
       - creative_id
+      - date  # Include date in PK for source table
+    aggregate_to_target: true  # After loading source, aggregate to target table
 
 linkedin_ads_campaign_audience:
   q: search

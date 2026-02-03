@@ -16,7 +16,7 @@ from typing import Dict, Final
 API_BASE_URL: Final[str] = "https://api.linkedin.com/rest"
 
 # Data extraction configuration
-INSIGHTS_LOOKBACK_DAYS: Final[int] = 150
+INSIGHTS_LOOKBACK_DAYS: Final[int] = 730  # 2 years of historical data
 
 # Company-to-Account Mapping
 # Maps LinkedIn account IDs (string) to internal company IDs (integer)
