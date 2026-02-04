@@ -26,9 +26,9 @@ google_ads_placement:
   queryget: [query_placement,query_placement_2]
   type: SearchGoogleAdsRequest
   processing:
-    handle_columns:
-      params: None
     rename_columns:
+      params: None
+    handle_columns:
       params: None
     add_row_loaded_date:
       params: None
@@ -159,9 +159,9 @@ google_ads_audience:
   queryget: [query_audience, query_audience_2]
   type: SearchGoogleAdsRequest
   processing:
-    handle_columns:
-      params: None
     rename_columns:
+      params: None
+    handle_columns:
       params: None
     add_row_loaded_date:
       params: None
@@ -184,9 +184,9 @@ google_ads_cost_by_device:
   queryget: [query_by_device,query_by_device_2]
   type: SearchGoogleAdsRequest
   processing:
-    handle_columns:
-      params: None
     rename_columns:
+      params: None
+    handle_columns:
       params: None
     convert_costs:
       col: ['cost_micros','costmicros','averagecpm','averagecost','averagecpc']
@@ -242,6 +242,8 @@ google_ads_account:
   processing:
     rename_columns:
       params: None
+    handle_columns:
+      params: None
     modify_name:
       cols: ['descriptive_name']
     add_row_loaded_date:
@@ -250,3 +252,4 @@ google_ads_account:
   query:
     column_name:
       - id
+  truncate: True

@@ -179,6 +179,7 @@ COLUMN_MAPPINGS: Dict[str, str] = {
     # Customer fields
     "customer.id": "customer_id_google",
     "customer_id": "customer_id_google",
+    "customerId": "customer_id_google",
 
     # Campaign fields
     "campaign.id": "campaign_id",
@@ -187,10 +188,17 @@ COLUMN_MAPPINGS: Dict[str, str] = {
     "campaign.start_date": "start_date",
     "campaign.end_date": "end_date",
     "campaign.serving_status": "serving_status",
+    "campaign.startDate": "start_date",
+    "campaign.endDate": "end_date",
+    "campaign.servingStatus": "serving_status",
+    "campaignId": "campaign_id",
+    "campaignName": "campaign_name",
+    "campaignStatus": "status",
 
     # Ad Group fields
     "ad_group.id": "adgroup_id",
     "adGroup.id": "adgroup_id",
+    "adGroupId": "adgroup_id",
     "id": "id",  # Keep 'id' as 'id' for placement table (after handle_columns, adGroup.id becomes 'id')
 
     # Ad fields
@@ -205,15 +213,22 @@ COLUMN_MAPPINGS: Dict[str, str] = {
     "metrics.impressions": "impressions",
     "metrics.conversions": "conversions",
     "metrics.cost_micros": "cost_micros",
+    "metrics.costMicros": "cost_micros",
     "metrics.average_cpc": "average_cpc",
+    "metrics.averageCpc": "average_cpc",
     "metrics.average_cpm": "average_cpm",
+    "metrics.averageCpm": "average_cpm",
     "metrics.average_cost": "average_cost",
+    "metrics.averageCost": "average_cost",
     "metrics.ctr": "ctr",
     "metrics.active_view_ctr": "active_view_ctr",
+    "metrics.activeViewCtr": "active_view_ctr",
 
     # Segment fields
     "segments.date": "date",
     "segments.device": "device",
+    "segmentsDate": "date",
+    "segmentsDevice": "device",
 
     # Placement fields
     "group_placement_view.resource_name": "resource_name",
@@ -221,9 +236,17 @@ COLUMN_MAPPINGS: Dict[str, str] = {
     "group_placement_view.placement_type": "placement_type",
     "group_placement_view.display_name": "display_name",
     "group_placement_view.target_url": "target_url",
+    "groupPlacementView.resourceName": "resource_name",
+    "groupPlacementView.placement": "placement",
+    "groupPlacementView.placementType": "placement_type",
+    "groupPlacementView.displayName": "display_name",
+    "groupPlacementView.targetUrl": "target_url",
 
     # Criterion fields
+    "ad_group_criterion.criterion_id": "id",
     "ad_group_criterion.display_name": "display_name",
+    "adGroupCriterion.criterionId": "id",
+    "adGroupCriterion.displayName": "display_name",
 
     # Customer client fields (hierarchy)
     "customer_client.id": "id",

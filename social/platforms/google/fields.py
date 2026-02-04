@@ -7,6 +7,8 @@ query_ads_ad_creatives = """
 SELECT
     ad_group_ad.ad.id,
     ad_group_ad.ad.name,
+    ad_group_ad.ad.type,
+    ad_group.id,
     ad_group_ad.ad.final_urls,
     ad_group_ad.ad.display_url,
     customer.id
@@ -47,6 +49,7 @@ SELECT
     campaign.id,
     campaign.name,
     campaign.status,
+    campaign.serving_status,
     campaign.start_date,
     campaign.end_date,
     customer.id
@@ -88,6 +91,7 @@ AND campaign.status = 'PAUSED'
 # Audience queries
 query_audience = """
 SELECT
+    ad_group_criterion.criterion_id,
     ad_group.id,
     ad_group_criterion.display_name,
     customer.id
@@ -99,6 +103,7 @@ AND ad_group_criterion.type IN ('USER_LIST', 'USER_INTEREST', 'AUDIENCE')
 
 query_audience_2 = """
 SELECT
+    ad_group_criterion.criterion_id,
     ad_group.id,
     ad_group_criterion.display_name,
     customer.id
@@ -117,7 +122,12 @@ SELECT
     campaign.id,
     metrics.impressions,
     metrics.clicks,
+    metrics.conversions,
     metrics.cost_micros,
+    metrics.ctr,
+    metrics.average_cpc,
+    metrics.average_cpm,
+    metrics.average_cost,
     segments.date,
     customer.id
 FROM ad_group_ad

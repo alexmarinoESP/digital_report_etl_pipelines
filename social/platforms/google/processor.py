@@ -26,7 +26,11 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 from loguru import logger
 
-from social.platforms.google.constants import COMPANY_ACCOUNT_MAP, MICROS_DIVISOR
+from social.platforms.google.constants import (
+    COMPANY_ACCOUNT_MAP,
+    COLUMN_MAPPINGS,
+    MICROS_DIVISOR,
+)
 from social.utils.aggregation import aggregate_metrics_by_entity
 
 
@@ -114,6 +118,33 @@ class GoogleProcessor:
 
         except Exception as e:
             logger.error(f"Error handling columns: {e}")
+
+        return self
+
+    def rename_columns(self) -> "GoogleProcessor":
+        """
+        Rename columns using COLUMN_MAPPINGS from constants.
+
+        This method applies the standard column name mappings defined in
+        constants.COLUMN_MAPPINGS to ensure consistent naming across all tables.
+
+        Returns:
+            Self for chaining
+        """
+        if self.df.empty:
+            return self
+
+        try:
+            logger.debug(f"rename_columns BEFORE: {self.df.columns.tolist()}")
+
+            # Apply column mappings
+            self.df.rename(columns=COLUMN_MAPPINGS, inplace=True)
+
+            logger.debug(f"rename_columns AFTER: {self.df.columns.tolist()}")
+            logger.debug(f"Renamed columns using COLUMN_MAPPINGS")
+
+        except Exception as e:
+            logger.error(f"Error renaming columns: {e}")
 
         return self
 

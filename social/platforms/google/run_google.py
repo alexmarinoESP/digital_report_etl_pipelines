@@ -138,15 +138,23 @@ def get_data_sink() -> Optional[object]:
         logger.info("Initializing Vertica storage backend")
 
         try:
-            from social.infrastructure.vertica_db_manager import VerticaDBManager
+            from social.infrastructure.database import VerticaDataSink
+            from social.core.config import DatabaseConfig
 
-            return VerticaDBManager(
+            # Create database config from environment variables
+            db_config = DatabaseConfig(
                 host=os.getenv("VERTICA_HOST"),
                 port=int(os.getenv("VERTICA_PORT", "5433")),
                 database=os.getenv("VERTICA_DATABASE"),
                 user=os.getenv("VERTICA_USER"),
                 password=os.getenv("VERTICA_PASSWORD"),
             )
+
+            # Check if running in test mode
+            test_mode = os.getenv("TEST_MODE", "false").lower() == "true"
+            logger.info(f"Test mode: {test_mode}")
+
+            return VerticaDataSink(config=db_config, test_mode=test_mode)
         except ImportError:
             raise ConfigurationError("Vertica dependencies not installed")
         except Exception as e:
@@ -202,7 +210,8 @@ def main() -> int:
 
         # Initialize token provider (not directly used, kept for protocol compatibility)
         token_provider = FileBasedTokenProvider(
-            token_file_path="tokens.json"  # Placeholder, not used for Google Ads
+            platform="google",
+            credentials_file=None  # Placeholder, not used for Google Ads
         )
 
         # Initialize data sink

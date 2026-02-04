@@ -1,24 +1,28 @@
-# Multi-stage build for LinkedIn Ads ETL Container
-# Optimized for Azure Container Apps with minimal size
+# Multi-stage build for LinkedIn Unified ETL Container (Ads + Organic Posts)
+# Optimized for Azure Container Apps with minimal size using uv
 
-# Stage 1: Builder - Install dependencies
+# Stage 1: Builder - Install dependencies with uv
 FROM python:3.12-slim AS builder
 
-# Install build dependencies
+# Install build dependencies and uv
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
     libpq-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Create virtual environment
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Copy only requirements first (for layer caching)
-COPY requirements-linkedin.txt /tmp/
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r /tmp/requirements-linkedin.txt
+# Set working directory
+WORKDIR /app
+
+# Copy dependency files (for layer caching)
+COPY pyproject.toml uv.lock README.md ./
+
+# Install dependencies with uv (social extras for all social platforms)
+RUN uv sync --frozen --no-dev --extra social
 
 # Stage 2: Runtime - Minimal final image
 FROM python:3.12-slim
@@ -28,9 +32,12 @@ RUN apt-get update && apt-get install -y \
     libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy virtual environment from builder
-COPY --from=builder /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+# Copy uv binary and virtual environment from builder
+COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
+COPY --from=builder /app/.venv /app/.venv
+
+# Set PATH for virtual environment
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash appuser && \
@@ -40,8 +47,9 @@ RUN useradd --create-home --shell /bin/bash appuser && \
 # Set working directory
 WORKDIR /app
 
-# Copy application code
+# Copy application code (linkedin + linkedin_posts + shared dependencies)
 COPY --chown=appuser:appuser social/ /app/social/
+COPY --chown=appuser:appuser shared/ /app/shared/
 
 # Set Python path
 ENV PYTHONPATH=/app
@@ -54,10 +62,10 @@ USER appuser
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD python -c "import sys; sys.exit(0)"
 
-# Entry point
-CMD ["python", "social/platforms/linkedin/run_linkedin.py"]
+# Entry point - Unified LinkedIn (Ads + Organic Posts)
+CMD ["python", "-m", "social.platforms.linkedin.run_linkedin_all"]
 
 # Labels for metadata
 LABEL maintainer="Data Science Team"
 LABEL version="1.0.0"
-LABEL description="LinkedIn Ads ETL Pipeline for Azure Container Apps"
+LABEL description="LinkedIn Unified ETL Pipeline (Ads + Organic Posts) for Azure Container Apps"
