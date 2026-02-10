@@ -74,12 +74,16 @@ def setup_logging(log_level: str = "INFO") -> None:
     # Remove default handler
     logger.remove()
 
-    # Add console handler with colors
+    # Disable colors on Azure (NO_COLOR env var or when running in container)
+    # Azure Container Apps doesn't render ANSI color codes correctly
+    use_colors = os.getenv("NO_COLOR") is None and os.getenv("LOGURU_COLORIZE", "true").lower() != "false"
+
+    # Add console handler
     logger.add(
         sys.stdout,
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
         level=log_level,
-        colorize=True,
+        colorize=use_colors,
     )
 
     # Add file handler (optional, for debugging)
@@ -169,9 +173,12 @@ def setup_token_provider() -> TokenProvider:
         raise AuthenticationError("Token provider setup failed") from e
 
 
-def get_ad_account_ids() -> List[str]:
+def get_ad_account_ids(token_provider: Any = None) -> List[str]:
     """
-    Get Facebook ad account IDs from environment.
+    Get Facebook ad account IDs from environment or credentials file.
+
+    Args:
+        token_provider: Optional TokenProvider with loaded credentials
 
     Returns:
         List of ad account IDs
@@ -180,18 +187,30 @@ def get_ad_account_ids() -> List[str]:
         ConfigurationError: If no account IDs are configured
     """
     try:
+        # Try environment variable first
         account_ids_str = os.getenv("FB_AD_ACCOUNT_IDS", "")
-        if not account_ids_str:
-            raise ConfigurationError("FB_AD_ACCOUNT_IDS environment variable not set")
 
-        # Split by comma and strip whitespace
-        account_ids = [aid.strip() for aid in account_ids_str.split(",") if aid.strip()]
+        if account_ids_str:
+            # Split by comma and strip whitespace
+            account_ids = [aid.strip() for aid in account_ids_str.split(",") if aid.strip()]
+            if account_ids:
+                logger.info(f"Configured {len(account_ids)} ad account(s) from environment")
+                return account_ids
 
-        if not account_ids:
-            raise ConfigurationError("No valid ad account IDs found in FB_AD_ACCOUNT_IDS")
+        # Fallback to credentials from token provider (file)
+        if token_provider and hasattr(token_provider, '_credentials'):
+            credentials = token_provider._credentials
+            if 'id_account' in credentials and credentials['id_account']:
+                account_ids = credentials['id_account']
+                if isinstance(account_ids, str):
+                    account_ids = [account_ids]
+                logger.info(f"Configured {len(account_ids)} ad account(s) from credentials file")
+                return account_ids
 
-        logger.info(f"Configured {len(account_ids)} ad account(s)")
-        return account_ids
+        raise ConfigurationError(
+            "No ad account IDs found. Set FB_AD_ACCOUNT_IDS environment variable "
+            "or configure 'id_account' in credentials file"
+        )
 
     except ConfigurationError:
         raise
@@ -241,7 +260,8 @@ def setup_vertica_sink() -> DataSink:
     """
     try:
         # Import here to avoid dependency if not using Vertica
-        from social.infrastructure.vertica_sink import VerticaDataSink
+        from social.infrastructure.database import VerticaDataSink
+        from social.core.config import DatabaseConfig
 
         # Get Vertica credentials from environment
         required_vars = {
@@ -270,15 +290,22 @@ def setup_vertica_sink() -> DataSink:
         config["port"] = int(os.getenv("VERTICA_PORT", "5433"))
         config["schema"] = os.getenv("VERTICA_SCHEMA", "GoogleAnalytics")
 
-        # Initialize Vertica client
-        vertica_sink = VerticaDataSink(
+        # Create database config (matches Google approach)
+        db_config = DatabaseConfig(
             host=config["host"],
+            port=config["port"],
+            database=config["database"],
             user=config["user"],
             password=config["password"],
-            database=config["database"],
-            port=config["port"],
             schema=config["schema"]
         )
+
+        # Check if running in test mode
+        test_mode = os.getenv("TEST_MODE", "false").lower() == "true"
+        logger.info(f"Test mode: {test_mode}")
+
+        # Initialize Vertica client
+        vertica_sink = VerticaDataSink(config=db_config, test_mode=test_mode)
 
         logger.success("Vertica data sink initialized")
         return vertica_sink
@@ -425,9 +452,9 @@ def main() -> int:
         logger.info("\n[2/5] Setting up token provider...")
         token_provider = setup_token_provider()
 
-        # Step 3: Get ad account IDs
+        # Step 3: Get ad account IDs (pass token_provider to allow fallback to credentials file)
         logger.info("\n[3/5] Loading ad account IDs...")
-        ad_account_ids = get_ad_account_ids()
+        ad_account_ids = get_ad_account_ids(token_provider=token_provider)
 
         # Step 4: Setup data sink
         logger.info("\n[4/5] Setting up data sink...")

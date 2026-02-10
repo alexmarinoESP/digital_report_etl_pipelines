@@ -51,9 +51,15 @@ WORKDIR /app
 COPY --chown=appuser:appuser social/ /app/social/
 COPY --chown=appuser:appuser shared/ /app/shared/
 
+# Copy Microsoft Ads tokens file
+COPY --chown=appuser:appuser social/platforms/microsoft/tokens.json /app/tokens.json
+
 # Set Python path
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
+
+# Set default token file location
+ENV TOKEN_FILE=/app/tokens.json
 
 # Switch to non-root user
 USER appuser

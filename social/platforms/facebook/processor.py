@@ -22,6 +22,7 @@ import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+import numpy as np
 import pandas as pd
 from loguru import logger
 
@@ -47,7 +48,7 @@ class FacebookProcessor:
         >>> clean_df = (processor
         ...     .extract_nested_actions()
         ...     .add_company()
-        ...     .add_row_loaded_date()
+        ...     .add_load_date()
         ...     .get_df())
 
     Attributes:
@@ -173,6 +174,7 @@ class FacebookProcessor:
             return self
 
         logger.info(f"Parsing targeting field from '{targeting_col}'")
+        logger.debug(f"Available columns before parsing: {list(self.df.columns)}")
 
         df_list = []
 
@@ -185,8 +187,8 @@ class FacebookProcessor:
                 if custom_audiences:
                     for audience in custom_audiences:
                         audience_row = {
-                            "campaign_id": row.get("campaign_id"),
-                            "adset_id": row.get("id"),
+                            "campaign_id": row.get("campaign_id") if "campaign_id" in row else None,
+                            "adset_id": row.get("id") if "id" in row else None,
                             "audience_id": audience.get("id"),
                             "audience_name": audience.get("name"),
                         }
@@ -230,6 +232,50 @@ class FacebookProcessor:
 
         return self
 
+    def rename_columns(self, renaming: Optional[Dict[str, str]] = None, col_dict: Optional[Dict[str, str]] = None) -> "FacebookProcessor":
+        """Rename columns in the DataFrame.
+
+        Args:
+            renaming: Dictionary mapping old column names to new names (new parameter name)
+            col_dict: Dictionary mapping old column names to new names (old parameter name, for backwards compatibility)
+
+        Returns:
+            Self for chaining
+        """
+        if self.df.empty:
+            return self
+
+        # Support both parameter names for backwards compatibility
+        mapping = renaming if renaming is not None else col_dict
+        if mapping is None:
+            logger.warning("No column mapping provided to rename_columns")
+            return self
+
+        self.df = self.df.rename(columns=mapping)
+        logger.debug(f"Renamed columns: {mapping}")
+        return self
+
+    def drop_na_rows(self, columns: List[str]) -> "FacebookProcessor":
+        """Drop rows where specified columns have NULL/NA values.
+
+        Args:
+            columns: List of column names to check for NULL values
+
+        Returns:
+            Self for chaining
+        """
+        if self.df.empty:
+            return self
+
+        rows_before = len(self.df)
+        self.df = self.df.dropna(subset=columns)
+        rows_after = len(self.df)
+
+        if rows_before > rows_after:
+            logger.info(f"Dropped {rows_before - rows_after} rows with NULL values in {columns}")
+
+        return self
+
     def add_company(self, account_column: str = "account_id") -> "FacebookProcessor":
         """Add company ID column based on account mapping.
 
@@ -256,7 +302,7 @@ class FacebookProcessor:
         logger.debug(f"Added company IDs for {len(self.df)} rows")
         return self
 
-    def add_row_loaded_date(self, **kwargs) -> "FacebookProcessor":
+    def add_load_date(self, **kwargs) -> "FacebookProcessor":
         """Add load_date column with current date (not timestamp).
 
         Args:
@@ -268,9 +314,15 @@ class FacebookProcessor:
         if self.df.empty:
             return self
 
-        self.df["load_date"] = datetime.now().date()
+        today = datetime.now().date()
+        self.df["load_date"] = today
         logger.debug("Added load_date column")
         return self
+
+    # Alias for backward compatibility with YAML config
+    def add_row_loaded_date(self, **kwargs) -> "FacebookProcessor":
+        """Alias for add_load_date() - for backward compatibility with config."""
+        return self.add_load_date(**kwargs)
 
     def fix_id_type(self, columns: List[str]) -> "FacebookProcessor":
         """Ensure ID columns are string type.
@@ -584,7 +636,7 @@ class FacebookProcessor:
         logger.debug("Converted NaN to None")
         return self
 
-    def deal_with_date(self, columns: List[str]) -> "FacebookProcessor":
+    def deal_with_date(self, columns: Optional[List[str]] = None, cols: Optional[List[str]] = None) -> "FacebookProcessor":
         """Convert date strings to datetime with support for ISO8601 and simple dates.
 
         Handles multiple date formats:
@@ -593,7 +645,8 @@ class FacebookProcessor:
         - Replaces NaT with None for database compatibility
 
         Args:
-            columns: List of column names containing dates
+            columns: List of column names containing dates (new parameter name)
+            cols: List of column names containing dates (old parameter name, for backwards compatibility)
 
         Returns:
             Self for chaining
@@ -601,28 +654,43 @@ class FacebookProcessor:
         if self.df.empty:
             return self
 
-        for col in columns:
+        # Support both parameter names for backwards compatibility
+        col_list = columns if columns is not None else cols
+        if col_list is None:
+            logger.warning("No columns provided to deal_with_date")
+            return self
+
+        for col in col_list:
             if col not in self.df.columns:
                 logger.warning(f"Column '{col}' not found, skipping date conversion")
                 continue
 
             try:
-                # Replace NaN with None first
-                self.df[col] = self.df[col].replace(pd.NaT, None).replace({pd.NA: None})
+                # Parse ISO8601 datetime strings and convert to Europe/Rome timezone
+                # Facebook returns format: "2024-01-15T10:30:00+0000" (UTC)
+                # OLD project converted to Europe/Rome timezone before saving (UTC+1/UTC+2)
 
-                # Try to parse dates with automatic format detection
+                # Replace NaN/None first (OLD project behavior)
+                self.df[col] = self.df[col].replace({np.nan: 0, 0: None})
+
+                # Parse datetime strings with timezone
                 self.df[col] = self.df[col].apply(
                     lambda x: pd.to_datetime(x, format="%Y-%m-%dT%H:%M:%S%z", errors="coerce")
-                    if isinstance(x, str) and "T" in x
-                    else pd.to_datetime(x, errors="coerce")
-                    if x is not None
-                    else None
+                    if not (isinstance(x, float) or x is None)
+                    else x
                 )
 
-                # Replace NaT with None after conversion
-                self.df[col] = self.df[col].where(pd.notna(self.df[col]), None)
+                # Convert to UTC-aware Series first (normalize all timezones)
+                self.df[col] = pd.to_datetime(self.df[col], utc=True, errors="coerce")
 
-                logger.debug(f"Converted date column: {col}")
+                # Convert from UTC to Europe/Rome timezone (matches OLD project behavior)
+                # This applies UTC+1 (or UTC+2 during DST)
+                if pd.api.types.is_datetime64tz_dtype(self.df[col]):
+                    self.df[col] = self.df[col].dt.tz_convert('Europe/Rome')
+                    # Remove timezone to make naive (required for Vertica TIMESTAMP)
+                    self.df[col] = self.df[col].dt.tz_localize(None)
+
+                logger.debug(f"Converted date column: {col} to Europe/Rome naive datetime")
             except Exception as e:
                 logger.warning(f"Failed to convert column '{col}' to datetime: {e}")
 

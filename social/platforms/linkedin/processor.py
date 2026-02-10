@@ -38,7 +38,7 @@ class LinkedInProcessor:
         >>> clean_df = (processor
         ...     .extract_id_from_urn(['id', 'campaign'])
         ...     .add_company()
-        ...     .add_row_loaded_date()
+        ...     .add_load_date()
         ...     .get_df())
 
     Attributes:
@@ -240,11 +240,7 @@ class LinkedInProcessor:
         return self
 
     def add_load_date(self) -> "LinkedInProcessor":
-        """Add load_date and row_loaded_date columns with current date.
-
-        Creates both columns for compatibility:
-        - load_date: new column (date only)
-        - row_loaded_date: legacy column (date only)
+        """Add load_date column with current date.
 
         Returns:
             Self for chaining
@@ -254,13 +250,12 @@ class LinkedInProcessor:
 
         today = datetime.now().date()
         self.df["load_date"] = today
-        self.df["row_loaded_date"] = today
-        logger.debug("Added load_date and row_loaded_date columns")
+        logger.debug("Added load_date column")
         return self
 
     # Alias for backward compatibility with YAML config
     def add_row_loaded_date(self) -> "LinkedInProcessor":
-        """Alias for add_load_date() - creates both date columns."""
+        """Alias for add_load_date() - for backward compatibility with config."""
         return self.add_load_date()
 
     def modify_name(self, columns: List[str]) -> "LinkedInProcessor":
@@ -504,5 +499,67 @@ class LinkedInProcessor:
             agg_method=agg_method,
             entity_id_columns=['creative_id', 'campaign_id', 'account', 'id']
         )
+
+        return self
+
+    def extract_creative_type_from_content(self) -> "LinkedInProcessor":
+        """Extract creative type from flattened content columns.
+
+        LinkedIn API v202601+ no longer returns explicit 'type' field.
+        After flattening, the content field becomes columns like:
+        - 'reference' → Sponsored Content (UGC: image/video/article)
+        - 'spotlight' → Spotlight Ads
+        - 'jobs' → Jobs Ads
+        - 'documentAd' → Document Ads
+        - 'thirdPartyVastTagVideoAd' → Third-party video
+
+        This method detects which column is present to infer the creative type.
+
+        Returns:
+            Self for chaining
+        """
+        if self.df.empty:
+            return self
+
+        # Check available columns
+        columns = set(self.df.columns)
+
+        def get_type_from_columns(row):
+            """Infer type from presence of specific flattened content columns.
+
+            LinkedIn creative types mapping:
+            - follow → FOLLOW_COMPANY_V2 (Follow Company Ads)
+            - reference → SPONSORED_STATUS_UPDATE (Sponsored Posts/UGC)
+            - spotlight → SPOTLIGHT_AD (Spotlight Ads - Dynamic Ads)
+            - jobs → JOBS_AD (Jobs Ads - Dynamic Ads)
+            - documentAd → DOCUMENT_AD (Document Ads)
+            - thirdPartyVastTagVideoAd → THIRD_PARTY_VIDEO_AD
+            """
+            # Priority order matters: follow before reference
+            # (some creatives might have both)
+            if 'follow' in columns and pd.notna(row.get('follow')):
+                return 'FOLLOW_COMPANY_V2'
+            elif 'reference' in columns and pd.notna(row.get('reference')):
+                return 'SPONSORED_STATUS_UPDATE'
+            elif 'spotlight' in columns and pd.notna(row.get('spotlight')):
+                return 'SPOTLIGHT_AD'
+            elif 'jobs' in columns and pd.notna(row.get('jobs')):
+                return 'JOBS_AD'
+            elif 'documentAd' in columns and pd.notna(row.get('documentAd')):
+                return 'DOCUMENT_AD'
+            elif 'thirdPartyVastTagVideoAd' in columns and pd.notna(row.get('thirdPartyVastTagVideoAd')):
+                return 'THIRD_PARTY_VIDEO_AD'
+            else:
+                # Unknown type - log for debugging
+                content_cols = [c for c in columns if c in ['reference', 'follow', 'spotlight', 'jobs', 'documentAd']]
+                if content_cols:
+                    logger.debug(f"Row {row.get('id')}: Found columns {content_cols} but all NULL")
+                return None
+
+        self.df['type'] = self.df.apply(get_type_from_columns, axis=1)
+
+        # Log type distribution summary
+        type_counts = self.df['type'].value_counts(dropna=False)
+        logger.info(f"Creative type distribution: {type_counts.to_dict()}")
 
         return self

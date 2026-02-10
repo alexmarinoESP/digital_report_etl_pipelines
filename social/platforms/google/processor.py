@@ -148,6 +148,30 @@ class GoogleProcessor:
 
         return self
 
+    def rename_placement_id(self) -> "GoogleProcessor":
+        """
+        Rename adgroup_id to id specifically for placement table.
+
+        After standard rename_columns, adGroup.id becomes adgroup_id,
+        but for placement table we need it as 'id' for the primary key.
+
+        Returns:
+            Self for chaining
+        """
+        if self.df.empty:
+            return self
+
+        try:
+            if "adgroup_id" in self.df.columns:
+                logger.debug("rename_placement_id: Renaming adgroup_id -> id")
+                self.df.rename(columns={"adgroup_id": "id"}, inplace=True)
+            else:
+                logger.warning("rename_placement_id: adgroup_id column not found")
+        except Exception as e:
+            logger.error(f"Error renaming placement id: {e}")
+
+        return self
+
     def convert_costs(self, columns: List[str]) -> "GoogleProcessor":
         """
         Convert Google Ads cost micros to actual currency units.

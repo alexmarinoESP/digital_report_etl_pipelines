@@ -14,19 +14,17 @@ platform:
 # - MICROSOFT_ADS_ACCOUNT_ID
 # - AZURE_TENANT_ID (for service principal auth)
 
-# Storage Configuration
-# Set STORAGE_TYPE environment variable to:
-# - "vertica" for Vertica database
-# - "azure_table" for Azure Table Storage
-storage:
-  schema: "GoogleAnalytics"  # Vertica schema name
-  default_load_mode: "append"  # append, replace, or upsert
+# Storage Configuration is handled by environment variables:
+# - STORAGE_TYPE: "vertica" or "azure_table"
+# - VERTICA_SCHEMA: Schema name (default: "GoogleAnalytics")
+# - TEST_MODE: "true" to write to _test tables
 
 # Table Definitions
 # Microsoft Ads has two main report types: Ad Performance and Campaign Performance
 
 # Ad Performance Report (detailed ad-level metrics)
-microsoft_ads_report:
+# NOTE: This writes to 'microsoft_ads_data' table to match existing production table
+microsoft_ads_data:
   # Report configuration
   report_name: "Ad"  # BingAds report type: "Ad" or "Campaign"
   time_period: "LastSixMonths"  # PredefinedTime: Yesterday, LastSevenDays, LastSixMonths, etc.
@@ -69,44 +67,45 @@ microsoft_ads_report:
       - AccountId
 
 # Campaign Performance Report (campaign-level aggregated metrics)
-microsoft_ads_campaign_report:
-  # Report configuration
-  report_name: "Campaign"
-  time_period: "LastSixMonths"
-  aggregation: "Summary"
-  header_identifier: "Conversions"
-
-  # Fields to include
-  fields:
-    - CustomerId
-    - CustomerName
-    - AccountId
-    - AccountName
-    - CampaignId
-    - CampaignName
-    - Clicks
-    - Conversions
-    - Impressions
-    - Spend
-    - AverageCpc
-    - AverageCpm
-    - Ctr
-
-  # Processing steps
-  processing:
-    - convert_id_types
-    - add_row_loaded_date
-    - add_ingestion_timestamp
-
-  # Database configuration
-  schema: "GoogleAnalytics"
-  load_mode: "replace"
-
-  # Query configuration
-  query:
-    column_name:
-      - CampaignId
-      - AccountId
+# COMMENTED OUT: Not used in production, only microsoft_ads_data is needed
+# microsoft_ads_campaign_report:
+#   # Report configuration
+#   report_name: "Campaign"
+#   time_period: "LastSixMonths"
+#   aggregation: "Summary"
+#   header_identifier: "Conversions"
+#
+#   # Fields to include
+#   fields:
+#     - CustomerId
+#     - CustomerName
+#     - AccountId
+#     - AccountName
+#     - CampaignId
+#     - CampaignName
+#     - Clicks
+#     - Conversions
+#     - Impressions
+#     - Spend
+#     - AverageCpc
+#     - AverageCpm
+#     - Ctr
+#
+#   # Processing steps
+#   processing:
+#     - convert_id_types
+#     - add_row_loaded_date
+#     - add_ingestion_timestamp
+#
+#   # Database configuration
+#   schema: "GoogleAnalytics"
+#   load_mode: "replace"
+#
+#   # Query configuration
+#   query:
+#     column_name:
+#       - CampaignId
+#       - AccountId
 
 # Optional: Daily Ad Performance Report
 # Uncomment to enable daily granularity reporting

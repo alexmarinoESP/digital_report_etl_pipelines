@@ -10,7 +10,7 @@ from typing import Final
 
 # Database constants
 DATABASE_SCHEMA: Final[str] = "GoogleAnalytics"
-DATABASE_TEST_SUFFIX: Final[str] = "_TEST"
+DATABASE_TEST_SUFFIX: Final[str] = "_test"
 
 # Date formats
 DATE_FORMAT_ISO: Final[str] = "%Y-%m-%d"

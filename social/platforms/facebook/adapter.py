@@ -348,16 +348,27 @@ class FacebookAdapter:
             # Extract audience targeting from ad sets
             audience_data = []
             for ad_set in ad_sets:
+                # Skip ad sets without required fields
+                adset_id = ad_set.get("id")
+                if not adset_id:
+                    logger.warning(f"Skipping ad set without id: {ad_set}")
+                    continue
+
                 targeting = ad_set.get("targeting", {})
 
                 # Extract custom audiences if present
                 custom_audiences = targeting.get("custom_audiences", [])
 
                 for audience in custom_audiences:
+                    audience_id = audience.get("id")
+                    if not audience_id:
+                        logger.warning(f"Skipping audience without id in adset {adset_id}")
+                        continue
+
                     audience_data.append({
                         "campaign_id": ad_set.get("campaign_id"),
-                        "adset_id": ad_set.get("id"),
-                        "audience_id": audience.get("id"),
+                        "adset_id": adset_id,
+                        "audience_id": audience_id,
                         "name": audience.get("name"),
                     })
 

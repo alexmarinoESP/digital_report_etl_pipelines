@@ -88,7 +88,7 @@ WHERE segments.date BETWEEN '{}' AND '{}'
 AND campaign.status = 'PAUSED'
 """
 
-# Audience queries
+# Audience queries - cannot use segments.date with ad_group_criterion resource
 query_audience = """
 SELECT
     ad_group_criterion.criterion_id,
@@ -96,8 +96,7 @@ SELECT
     ad_group_criterion.display_name,
     customer.id
 FROM ad_group_criterion
-WHERE segments.date BETWEEN '{}' AND '{}'
-AND campaign.status = 'ENABLED'
+WHERE campaign.status = 'ENABLED'
 AND ad_group_criterion.type IN ('USER_LIST', 'USER_INTEREST', 'AUDIENCE')
 """
 
@@ -108,8 +107,7 @@ SELECT
     ad_group_criterion.display_name,
     customer.id
 FROM ad_group_criterion
-WHERE segments.date BETWEEN '{}' AND '{}'
-AND campaign.status = 'PAUSED'
+WHERE campaign.status = 'PAUSED'
 AND ad_group_criterion.type IN ('USER_LIST', 'USER_INTEREST', 'AUDIENCE')
 """
 

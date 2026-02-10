@@ -301,13 +301,6 @@ class VerticaDataSink:
         )
         columns = [row[0] for row in cursor.fetchall()]
         logger.debug(f"Column order for {self.schema}.{table_name}: {columns}")
-
-        # CRITICAL: Check if load_date exists in database
-        if 'load_date' not in columns:
-            logger.warning(f"⚠️ load_date NOT in database table {self.schema}.{table_name}! Available columns: {columns}")
-        else:
-            logger.debug(f"✓ load_date found in database at position {columns.index('load_date')}")
-
         return columns
 
     def _add_missing_columns(self, df: pd.DataFrame, col_order: List[str]) -> pd.DataFrame:
@@ -344,16 +337,16 @@ class VerticaDataSink:
         Returns:
             DataFrame with aligned types
         """
-        # Get column data types from Vertica
+        # Get column data types from Vertica (including precision and scale)
         cursor.execute(
-            "SELECT column_name, data_type FROM v_catalog.columns WHERE table_schema = %s AND table_name = %s",
+            "SELECT column_name, data_type, numeric_scale FROM v_catalog.columns WHERE table_schema = %s AND table_name = %s",
             (self.schema, table_name)
         )
 
-        column_types = pd.DataFrame(cursor.fetchall(), columns=["column_name", "data_type"])
+        column_types = pd.DataFrame(cursor.fetchall(), columns=["column_name", "data_type", "numeric_scale"])
 
         # Remove precision/scale from type (e.g., "numeric(18,2)" -> "numeric")
-        column_types["data_type"] = column_types["data_type"].apply(
+        column_types["data_type_clean"] = column_types["data_type"].apply(
             lambda x: re.sub(r"\([^()]*\)", "", x)
         )
 
@@ -371,7 +364,8 @@ class VerticaDataSink:
 
         for _, row in column_types.iterrows():
             col_name = row["column_name"]
-            db_type = row["data_type"].lower()
+            db_type = row["data_type_clean"].lower()
+            numeric_scale = row["numeric_scale"]
 
             if col_name not in df.columns:
                 continue
@@ -383,7 +377,9 @@ class VerticaDataSink:
             # Handle float conversion
             if db_type in ["float", "numeric"] and not df[col_name].isna().all():
                 df[col_name] = pd.to_numeric(df[col_name], errors="coerce")
-                df[col_name] = df[col_name].round(2)
+                # DON'T ROUND - let Vertica handle precision based on column definition
+                # The old hardcoded round(2) was destroying precision for columns like CTR
+                # that need 4+ decimals
 
             # Handle int conversion
             elif db_type in ["int", "integer"] and not df[col_name].isna().all():
@@ -564,12 +560,13 @@ class VerticaDataSink:
             logger.debug(f"Loaded {rows_in_source} rows into {source_table}")
 
             # Step 3: Build MERGE query
-            # Identify update columns (all columns except PK and metadata)
+            # Identify update columns (all columns except PK)
+            # Note: load_date IS updated to track when each row was last refreshed
             all_columns = list(df.columns)
             update_columns = [
                 col for col in all_columns
                 if col not in pk_columns
-                and col not in ["load_date", "last_updated_date"]
+                and col not in ["last_updated_date"]  # Only exclude deprecated column
             ]
 
             if not update_columns:
@@ -581,8 +578,7 @@ class VerticaDataSink:
             # Build ON clause: TGT.id = SRC.id AND TGT.date = SRC.date
             on_conditions = " AND ".join([f"TGT.{col} = SRC.{col}" for col in pk_columns])
 
-            # Build SET clause: field1=SRC.field1, field2=SRC.field2, ...
-            # Note: load_date is updated automatically when row changes
+            # Build SET clause: field1=SRC.field1, field2=SRC.field2, load_date=SRC.load_date, ...
             set_assignments = ", ".join([f"{col} = SRC.{col}" for col in update_columns])
 
             # Build MERGE query
@@ -669,13 +665,25 @@ class VerticaDataSink:
                         logger.debug(f"Detected PK: ({id_col}) - aggregated data (no date)")
                     return pk_candidates
 
-        # Rule 3: Device-level aggregation (Google Ads cost_by_device)
+        # Rule 3: Audience targeting tables (Facebook)
+        if "audience_id" in df.columns and "adset_id" in df.columns:
+            pk_candidates.extend(["audience_id", "adset_id"])
+            logger.debug("Detected PK: (audience_id, adset_id) - audience targeting")
+            return pk_candidates
+
+        # Rule 3b: Insight actions table (Facebook)
+        if "ad_id" in df.columns and "action_type" in df.columns:
+            pk_candidates.extend(["ad_id", "action_type"])
+            logger.debug("Detected PK: (ad_id, action_type) - insight actions")
+            return pk_candidates
+
+        # Rule 4: Device-level aggregation (Google Ads cost_by_device)
         if "ad_id" in df.columns and "device" in df.columns:
             pk_candidates.extend(["ad_id", "device"])
             logger.debug("Detected PK: (ad_id, device) - device aggregation")
             return pk_candidates
 
-        # Rule 4: Composite keys without date
+        # Rule 5: Composite keys without date
         if "campaign_id" in df.columns and "adgroup_id" in df.columns and "ad_id" in df.columns:
             pk_candidates.extend(["campaign_id", "adgroup_id", "ad_id"])
             logger.debug("Detected PK: (campaign_id, adgroup_id, ad_id) - composite key")
@@ -711,6 +719,21 @@ class VerticaDataSink:
         # This is necessary because .values.tolist() converts NaT to string "NaT"
         df = df.replace({pd.NaT: None})
         df = df.where(pd.notna(df), None)
+
+        # CRITICAL: Filter NULL values in Primary Key columns
+        # This replicates OLD project's behavior (connectdb.py line 301)
+        # where rows with NULL in PK columns are dropped before COPY
+        pk_columns = self._detect_pk_columns(df)
+        if pk_columns:
+            rows_before = len(df)
+            df = df.dropna(subset=pk_columns)
+            rows_filtered = rows_before - len(df)
+
+            if rows_filtered > 0:
+                logger.warning(
+                    f"Filtered {rows_filtered} rows with NULL values in PK columns {pk_columns} "
+                    f"before writing to {table_name}"
+                )
 
         # DEBUG: Check load_date values
         if 'load_date' in df.columns:

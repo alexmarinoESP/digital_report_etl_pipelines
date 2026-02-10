@@ -88,6 +88,10 @@ spec:
         - name: CONTAINER_MODE
           value: "true"
 
+        # TEST MODE - Set to "true" to write to _test tables
+        - name: TEST_MODE
+          value: "true"
+
         # Logging
         - name: LOG_LEVEL
           value: "INFO"

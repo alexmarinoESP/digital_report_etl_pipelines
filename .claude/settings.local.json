@@ -2,7 +2,29 @@
   "permissions": {
     "allow": [
       "Bash(az containerapp job update:*)",
-      "Bash(Select-String -Pattern \"(vertica|Installing|Resolved)\")"
+      "Bash(Select-String -Pattern \"(vertica|Installing|Resolved)\")",
+      "Bash(Select-String -Pattern \"(Columns|Column ''''|First row|Retrieved)\")",
+      "Bash(az containerapp job execution:*)",
+      "Bash(Select-String -Pattern \"(FAIL|ERROR|OK|SUCCESS|Fetching|Processing|id|columns|adgroup_id)\")",
+      "Bash(docker build:*)",
+      "Bash(az acr login:*)",
+      "Bash(docker tag:*)",
+      "Bash(docker push:*)",
+      "Bash(az containerapp job show:*)",
+      "Bash(set TEST_MODE=true)",
+      "Bash(set VERTICA_HOST=10.128.6.48)",
+      "Bash(set VERTICA_PORT=5433)",
+      "Bash(set VERTICA_DATABASE=DWPRD)",
+      "Bash(set VERTICA_USER=bi_alex)",
+      "Bash(set VERTICA_PASSWORD=Temporary1234!)",
+      "Bash(set STORAGE_TYPE=vertica)",
+      "Bash(set LOG_LEVEL=INFO)",
+      "Bash(python:*)",
+      "Bash(uv run:*)",
+      "Bash(az containerapp job list:*)",
+      "Bash(dir:*)",
+      "Bash(findstr:*)",
+      "Bash(copy \"microsoft-ads-etl\\tokens.json\" \"tokens.json\")"
     ],
     "deny": [],
     "ask": []

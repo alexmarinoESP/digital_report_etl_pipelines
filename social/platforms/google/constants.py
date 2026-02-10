@@ -128,6 +128,7 @@ GAQL_QUERIES: Dict[str, str] = {
           customer.id
         FROM ad_group_audience_view
         WHERE campaign.serving_status IN ('ENDED','SERVING')
+        AND ad_group_criterion.type IN ('USER_LIST', 'USER_INTEREST', 'AUDIENCE')
     """,
 
     # Audience query - for PAUSED campaigns
@@ -138,6 +139,7 @@ GAQL_QUERIES: Dict[str, str] = {
           customer.id
         FROM ad_group_audience_view
         WHERE campaign.status IN ('PAUSED')
+        AND ad_group_criterion.type IN ('USER_LIST', 'USER_INTEREST', 'AUDIENCE')
     """,
 
     # Device breakdown query - for ENABLED campaigns
@@ -178,11 +180,13 @@ GAQL_QUERIES: Dict[str, str] = {
 COLUMN_MAPPINGS: Dict[str, str] = {
     # Customer fields
     "customer.id": "customer_id_google",
+    "customer.resourceName": "customer_resource_name",
     "customer_id": "customer_id_google",
     "customerId": "customer_id_google",
 
     # Campaign fields
     "campaign.id": "campaign_id",
+    "campaign.resourceName": "campaign_resource_name",
     "campaign.name": "campaign_name",
     "campaign.status": "status",
     "campaign.start_date": "start_date",
@@ -198,15 +202,21 @@ COLUMN_MAPPINGS: Dict[str, str] = {
     # Ad Group fields
     "ad_group.id": "adgroup_id",
     "adGroup.id": "adgroup_id",
+    "adGroup.resourceName": "adgroup_resource_name",
     "adGroupId": "adgroup_id",
     "id": "id",  # Keep 'id' as 'id' for placement table (after handle_columns, adGroup.id becomes 'id')
 
     # Ad fields
     "ad_group_ad.ad.id": "ad_id",
+    "adGroupAd.ad.id": "ad_id",
+    "adGroupAd.resourceName": "adgroupad_resource_name",
+    "adGroupAd.ad.resourceName": "ad_resource_name",
     "ad.id": "ad_id",
     "ad_group_ad.ad.name": "ad_name",
+    "adGroupAd.ad.name": "ad_name",
     "ad.name": "ad_name",
     "ad_group_ad.ad.type": "ad_type",
+    "adGroupAd.ad.type": "ad_type",
 
     # Metrics fields
     "metrics.clicks": "clicks",
@@ -285,4 +295,13 @@ COLUMN_MAPPINGS: Dict[str, str] = {
     # Placement fields after handle_columns() lowercase conversion
     "placementtype": "placement_type",
     "targeturl": "target_url",
+
+    # Standalone field names (when already processed or without prefix)
+    "placement": "placement",
+    "impressions": "impressions",
+    "clicks": "clicks",
+    "conversions": "conversions",
+    "date": "date",
+    "device": "device",
+    "name": "name",
 }

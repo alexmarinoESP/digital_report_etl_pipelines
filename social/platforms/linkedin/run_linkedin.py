@@ -49,7 +49,7 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 import yaml
 from loguru import logger
@@ -59,7 +59,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from social.core.exceptions import AuthenticationError, ConfigurationError, PipelineError
 from social.core.protocols import DataSink, TokenProvider
-from social.infrastructure.file_token_provider import FileBasedTokenProvider
 from social.platforms.linkedin.pipeline import LinkedInPipeline
 
 
@@ -73,12 +72,16 @@ def setup_logging(log_level: str = "INFO") -> None:
     # Remove default handler
     logger.remove()
 
-    # Add console handler with colors
+    # Disable colors on Azure (NO_COLOR env var or when running in container)
+    # Azure Container Apps doesn't render ANSI color codes correctly
+    use_colors = os.getenv("NO_COLOR") is None and os.getenv("LOGURU_COLORIZE", "true").lower() != "false"
+
+    # Add console handler
     logger.add(
         sys.stdout,
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
         level=log_level,
-        colorize=True,
+        colorize=use_colors,
     )
 
     # Add file handler (optional, for debugging)
@@ -135,7 +138,7 @@ def load_configuration() -> Dict[str, Any]:
 
 def setup_token_provider() -> TokenProvider:
     """
-    Setup LinkedIn token provider with credentials.
+    Setup LinkedIn token provider with credentials from Vertica.
 
     Returns:
         Configured TokenProvider instance
@@ -144,15 +147,30 @@ def setup_token_provider() -> TokenProvider:
         AuthenticationError: If authentication setup fails
     """
     try:
-        logger.info("Setting up token provider")
+        logger.info("Setting up token provider (Vertica)")
 
-        # Get credentials file path (optional)
-        credentials_file = os.getenv("CREDENTIALS_FILE")
+        # Get Vertica credentials from environment
+        host = os.getenv("VERTICA_HOST")
+        port = int(os.getenv("VERTICA_PORT", "5433"))
+        database = os.getenv("VERTICA_DATABASE")
+        user = os.getenv("VERTICA_USER")
+        password = os.getenv("VERTICA_PASSWORD")
 
-        # Initialize file-based token provider
-        token_provider = FileBasedTokenProvider(
-            platform="linkedin",
-            credentials_file=credentials_file
+        if not all([host, database, user, password]):
+            raise AuthenticationError(
+                "Missing Vertica credentials in environment variables",
+                details={"host": bool(host), "database": bool(database), "user": bool(user), "password": bool(password)}
+            )
+
+        # Initialize Vertica-based token provider (reads from ESPDM.SOCIAL_ADS_POSTS_ACCESS_CODE)
+        from social.platforms.linkedin.vertica_token_provider import VerticaTokenProvider
+
+        token_provider = VerticaTokenProvider(
+            host=host,
+            port=port,
+            database=database,
+            user=user,
+            password=password
         )
 
         # Validate token
@@ -160,7 +178,7 @@ def setup_token_provider() -> TokenProvider:
         if not access_token:
             raise AuthenticationError("No access token available")
 
-        logger.success("Token provider initialized")
+        logger.success("Token provider initialized from Vertica")
         return token_provider
 
     except Exception as e:
@@ -209,7 +227,8 @@ def setup_vertica_sink() -> Any:
     """
     try:
         # Import here to avoid dependency if not using Vertica
-        from social.infrastructure.vertica_sink import VerticaDataSink
+        from social.infrastructure.database import VerticaDataSink
+        from social.core.config import DatabaseConfig
 
         # Get Vertica credentials from environment
         required_vars = {
@@ -234,20 +253,26 @@ def setup_vertica_sink() -> Any:
                 f"Missing Vertica configuration: {', '.join(missing_vars)}"
             )
 
-        # Get optional port
+        # Get optional port and schema
         config["port"] = int(os.getenv("VERTICA_PORT", "5433"))
+        config["schema"] = "GoogleAnalytics"
 
-        # Initialize Vertica client
-        vertica_sink = VerticaDataSink(
+        # Initialize Vertica client with DatabaseConfig
+        db_config = DatabaseConfig(
             host=config["host"],
+            port=config["port"],
+            database=config["database"],
             user=config["user"],
             password=config["password"],
-            database=config["database"],
-            port=config["port"],
-            schema="GoogleAnalytics"
+            schema=config["schema"]
         )
 
-        logger.success("Vertica data sink initialized")
+        # Check for TEST_MODE
+        test_mode = os.getenv("TEST_MODE", "false").lower() == "true"
+
+        vertica_sink = VerticaDataSink(config=db_config, test_mode=test_mode)
+
+        logger.success(f"Vertica data sink initialized (test_mode={test_mode})")
         return vertica_sink
 
     except ConfigurationError:

@@ -33,6 +33,8 @@ from social.core.protocols import DataSink, TokenProvider
 from social.platforms.google.adapter import GoogleAdapter
 from social.platforms.google.constants import API_VERSION, DEFAULT_LOOKBACK_DAYS
 from social.platforms.google.processor import GoogleProcessor
+from social.platforms.google.simple_processor import SimpleGoogleProcessor
+from social.platforms.google.column_mapper import GoogleColumnMapper
 
 
 class GooglePipeline:
@@ -349,48 +351,84 @@ class GooglePipeline:
         if df.empty:
             return df
 
-        # Create processor
-        processor = GoogleProcessor(df)
+        # Check if using new simple processor (opt-in via config)
+        use_simple_processor = table_config.get("use_simple_processor", False)
 
-        # Apply processing steps from configuration
-        processing_config = table_config.get("processing", {})
+        if use_simple_processor:
+            # NEW APPROACH: Use SimpleGoogleProcessor with column_mapping.yml
+            logger.info(f"Using SimpleGoogleProcessor for {table_name}")
+            processor = SimpleGoogleProcessor(table_name)
 
-        for step_name, step_params in processing_config.items():
-            try:
-                # Get the processing method
-                method = getattr(processor, step_name, None)
+            # Process with explicit configuration
+            use_source = table_config.get("merge", {}).get("table_name_source") is not None
+            clean_placement = "placement" in table_name.lower()
+            clean_audience = "audience" in table_name.lower()
 
-                if method is None:
-                    logger.warning(f"Unknown processing step: {step_name}")
-                    continue
+            df = processor.process(
+                df,
+                clean_placement=clean_placement,
+                clean_audience=clean_audience,
+                use_source_columns=use_source
+            )
 
-                # Parse parameters
-                if step_params is None or step_params == "None":
-                    # No parameters needed
-                    processor = method()
-                elif isinstance(step_params, dict):
-                    # Handle both 'params' and 'cols'/'col'/'columns' keys
-                    params = step_params.get("params")
-                    cols = step_params.get("cols") or step_params.get("col") or step_params.get("columns")
+            # Apply optional post-processing
+            processing_config = table_config.get("processing", {})
 
-                    if params is None or params == "None":
-                        # Use cols if available
-                        if cols:
-                            processor = method(cols)
+            if processing_config.get("limit_placement"):
+                df = processor.limit_placement(df)
+
+            if processing_config.get("aggregate_by_device"):
+                df = processor.aggregate_by_device(df)
+
+            if processing_config.get("drop_duplicates"):
+                df = processor.drop_duplicates(df)
+
+            return df
+
+        else:
+            # OLD APPROACH: Use legacy GoogleProcessor with dynamic methods
+            logger.debug(f"Using legacy GoogleProcessor for {table_name}")
+            processor = GoogleProcessor(df)
+
+            # Apply processing steps from configuration
+            processing_config = table_config.get("processing", {})
+
+            for step_name, step_params in processing_config.items():
+                try:
+                    # Get the processing method
+                    method = getattr(processor, step_name, None)
+
+                    if method is None:
+                        logger.warning(f"Unknown processing step: {step_name}")
+                        continue
+
+                    # Parse parameters
+                    if step_params is None or step_params == "None":
+                        # No parameters needed
+                        processor = method()
+                    elif isinstance(step_params, dict):
+                        # Handle both 'params' and 'cols'/'col'/'columns' keys
+                        params = step_params.get("params")
+                        cols = step_params.get("cols") or step_params.get("col") or step_params.get("columns")
+
+                        if params is None or params == "None":
+                            # Use cols if available
+                            if cols:
+                                processor = method(cols)
+                            else:
+                                processor = method()
                         else:
-                            processor = method()
+                            # Use params directly
+                            processor = method(**params)
                     else:
-                        # Use params directly
-                        processor = method(**params)
-                else:
-                    logger.warning(f"Invalid parameters for {step_name}: {step_params}")
-                    continue
+                        logger.warning(f"Invalid parameters for {step_name}: {step_params}")
+                        continue
 
-            except Exception as e:
-                logger.error(f"Failed to apply processing step '{step_name}': {e}")
-                # Continue with other steps
+                except Exception as e:
+                    logger.error(f"Failed to apply processing step '{step_name}': {e}")
+                    # Continue with other steps
 
-        return processor.get_df()
+            return processor.get_df()
 
     def _load_to_sink(
         self,

@@ -1,0 +1,215 @@
+# =============================================================================
+# Google Ads API → Vertica DB Column Mappings
+# =============================================================================
+# This file defines explicit mappings between Google Ads API response fields
+# (after MessageToDict + json_normalize) and Vertica database columns.
+#
+# Structure:
+#   table_name:
+#     api_to_db:
+#       "api.field.name": "db_column_name"
+#     conversions:
+#       cost_fields: [list of fields to divide by 1,000,000]
+#     metadata:
+#       add_load_date: true/false
+# =============================================================================
+
+# Placement table
+google_ads_placement:
+  api_to_db:
+    # IDs - placement uses adGroup.id as primary key
+    "customer.id": "customer_id_google"
+    "adGroup.id": "id"
+    # Placement fields
+    "groupPlacementView.placement": "placement"
+    "groupPlacementView.placementType": "placement_type"
+    "groupPlacementView.displayName": "display_name"
+    "groupPlacementView.targetUrl": "target_url"
+    # Metrics
+    "metrics.impressions": "impressions"
+    "metrics.activeViewCtr": "active_view_ctr"
+  conversions:
+    cost_fields: []
+  metadata:
+    add_load_date: true
+  db_columns:
+    - id
+    - placement
+    - placement_type
+    - display_name
+    - target_url
+    - impressions
+    - active_view_ctr
+    - customer_id_google
+    - load_date
+
+# Ad Creatives table
+google_ads_ad_creatives:
+  api_to_db:
+    "customer.id": "customer_id_google"
+    "adGroup.id": "adgroup_id"
+    "adGroupAd.ad.id": "ad_id"
+    "adGroupAd.ad.name": "ad_name"
+    "adGroupAd.ad.type": "ad_type"
+  conversions:
+    cost_fields: []
+  metadata:
+    add_load_date: true
+  db_columns:
+    - ad_id
+    - adgroup_id
+    - ad_name
+    - ad_type
+    - customer_id_google
+    - load_date
+
+# Campaign table
+google_ads_campaign:
+  api_to_db:
+    "customer.id": "customer_id_google"
+    "campaign.id": "id"
+    "campaign.name": "name"
+    "campaign.status": "status"
+    "campaign.servingStatus": "serving_status"
+    # Date fields - MessageToDict returns camelCase
+    "campaign.startDate": "start_date"
+    "campaign.endDate": "end_date"
+  conversions:
+    cost_fields: []
+  metadata:
+    add_load_date: true
+    process_dates: ["start_date", "end_date"]  # Convert YYYYMMDD → YYYY-MM-DD or YYYY-MM-DD → datetime
+  db_columns:
+    - id
+    - name
+    - status
+    - serving_status
+    - start_date
+    - end_date
+    - customer_id_google
+    - load_date
+
+# Report table (loads to _source, then aggregates to target)
+# NOTE: This table has 'date' field but NO 'load_date' (matches old project)
+google_ads_report:
+  api_to_db:
+    "customer.id": "customer_id_google"
+    "campaign.id": "campaign_id"
+    "adGroup.id": "adgroup_id"
+    "adGroupAd.ad.id": "ad_id"
+    "segments.date": "date"
+    # Metrics
+    "metrics.clicks": "clicks"
+    "metrics.impressions": "impressions"
+    "metrics.conversions": "conversions"
+    "metrics.costMicros": "cost_micros"
+    "metrics.ctr": "ctr"
+    "metrics.averageCpc": "average_cpc"
+    "metrics.averageCpm": "average_cpm"
+    "metrics.averageCost": "average_cost"
+  conversions:
+    cost_fields: ["cost_micros", "average_cpc", "average_cpm", "average_cost"]
+  metadata:
+    add_load_date: false  # Report uses 'date' instead of 'load_date'
+  db_columns_source:
+    - date
+    - campaign_id
+    - adgroup_id
+    - ad_id
+    - clicks
+    - impressions
+    - conversions
+    - cost_micros
+    - average_cpm
+    - average_cpc
+    - average_cost
+    - ctr
+    - customer_id_google
+  db_columns_target:
+    - date
+    - campaign_id
+    - adgroup_id
+    - ad_id
+    - clicks
+    - impressions
+    - conversions
+    - cost_micros
+    - average_cpm
+    - average_cpc
+    - average_cost
+    - ctr
+    - customer_id_google
+
+# Audience table
+google_ads_audience:
+  api_to_db:
+    "customer.id": "customer_id_google"
+    "adGroup.id": "id"
+    "adGroupCriterion.displayName": "display_name"
+  conversions:
+    cost_fields: []
+  metadata:
+    add_load_date: true
+  db_columns:
+    - id
+    - display_name
+    - customer_id_google
+    - load_date
+
+# Cost by Device table
+google_ads_cost_by_device:
+  api_to_db:
+    "customer.id": "customer_id_google"
+    "adGroupAd.ad.id": "ad_id"
+    "segments.device": "device"
+    "metrics.clicks": "clicks"
+    "metrics.costMicros": "cost_micros"
+  conversions:
+    cost_fields: ["cost_micros"]
+  metadata:
+    add_load_date: true
+  db_columns:
+    - ad_id
+    - device
+    - clicks
+    - cost_micros
+    - customer_id_google
+    - load_date
+
+# Account table (hierarchy data)
+google_ads_account:
+  api_to_db:
+    "customerClient.id": "id"
+    "customerClient.descriptiveName": "descriptive_name"
+    "customerClient.manager": "manager"
+    "customerClient.status": "status"
+    "customerClient.currencyCode": "currency_code"
+    "customerClient.timeZone": "time_zone"
+    "customerClient.level": "level"
+  conversions:
+    cost_fields: []
+  metadata:
+    add_load_date: true
+  db_columns:
+    - id
+    - descriptive_name
+    - manager
+    - status
+    - currency_code
+    - time_zone
+    - level
+    - load_date
+
+# Violation (alert-only, no DB insert)
+google_ads_violation:
+  api_to_db:
+    "customer.id": "customer_id_google"
+    "adGroupAd.ad.id": "ad_id"
+    "adGroupAd.policySummary.approvalStatus": "approval_status"
+    "adGroupAd.policySummary.reviewStatus": "review_status"
+  conversions:
+    cost_fields: []
+  metadata:
+    add_load_date: false
+    alert_only: true
+  db_columns: []

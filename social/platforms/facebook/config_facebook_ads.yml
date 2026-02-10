@@ -1,14 +1,12 @@
 platform:
   api_base_url: "https://graph.facebook.com"
-  api_version: "v19.0"
+  api_version: "v24.0"
 
 fb_ads_audience_adset:
   type: get_audience_targeting  # Use special adapter method that extracts audiences
   date_preset:  last_7d
   fields: fields_ads_audience_adset
   processing:
-    modify_name:
-      cols: ['name']  # Audience name from API
     add_row_loaded_date:
       params: None
 
@@ -30,18 +28,18 @@ fb_ads_campaign:
   fields: fields_ads_campaign
   date_preset: last_7d
   processing:
-    rename_column:
+    rename_columns:
       renaming:
         id: campaign_id
-    convert_unix_timestamp_to_date:
-      columns: [created_time]
-    convert_nat_to_nan:
-      columns: [created_time]
+    deal_with_date:
+      cols: [created_time]
+    add_row_loaded_date:
+      params: None
   scope: account
   query:
     column_name:
       - campaign_id
-  # Changed to upsert for full row updates
+  # UPSERT mode: insert new campaigns, update existing ones
   upsert:
     pk_columns:
       - campaign_id
@@ -149,10 +147,12 @@ fb_ads_custom_conversion:
   fields: fields_custom_convers
   date_preset: last_7d
   processing:
-    rename_column:
+    rename_columns:
       renaming:
         id: conversion_id
     extract_pixel_rule:
+      params: None
+    add_row_loaded_date:
       params: None
 
   query:
@@ -172,6 +172,10 @@ fb_ads_ad_set:
   processing:
     convert_unix_timestamp_to_date:
       columns: ['start_time','end_time']
+    convert_nat_to_nan:
+      columns: ['start_time','end_time']
+    add_row_loaded_date:
+      params: None
   scope: account
   query:
     column_name:

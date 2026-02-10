@@ -279,8 +279,9 @@ def setup_vertica_sink() -> Any:
         ConfigurationError: If Vertica configuration is invalid
     """
     try:
-        # Import here to avoid dependency if not using Vertica
-        from microsoft_ads_etl.app.db_manager import VerticaDBManager
+        # Import from the new refactored infrastructure
+        from social.infrastructure.database import VerticaDataSink
+        from social.core.config import DatabaseConfig
 
         # Get Vertica credentials from environment
         required_vars = {
@@ -305,19 +306,30 @@ def setup_vertica_sink() -> Any:
                 f"Missing Vertica configuration: {', '.join(missing_vars)}"
             )
 
-        # Get optional port
-        config["port"] = int(os.getenv("VERTICA_PORT", "5433"))
+        # Get optional port and schema
+        port = int(os.getenv("VERTICA_PORT", "5433"))
+        schema = os.getenv("VERTICA_SCHEMA", "GoogleAnalytics")
 
-        # Initialize Vertica client
-        vertica_client = VerticaDBManager(
+        # Check if TEST_MODE is enabled
+        test_mode = os.getenv("TEST_MODE", "false").lower() == "true"
+
+        if test_mode:
+            logger.warning("TEST_MODE=true - Data will be written to _test tables")
+
+        # Create DatabaseConfig
+        db_config = DatabaseConfig(
             host=config["host"],
             user=config["user"],
             password=config["password"],
             database=config["database"],
-            port=config["port"],
+            port=port,
+            schema=schema,
         )
 
-        logger.success("Vertica data sink initialized")
+        # Initialize Vertica data sink
+        vertica_client = VerticaDataSink(config=db_config, test_mode=test_mode)
+
+        logger.success(f"Vertica data sink initialized (test_mode={test_mode})")
         return vertica_client
 
     except ConfigurationError:

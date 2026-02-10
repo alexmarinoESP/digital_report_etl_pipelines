@@ -464,11 +464,17 @@ class MicrosoftAdsClient:
         # Step 4: Convert CTR from percentage string to float
         if "Ctr" in df_cleaned.columns:
             try:
+                # DEBUG: Log CTR values before conversion
+                logger.debug(f"CTR before conversion - dtype: {df_cleaned['Ctr'].dtype}, sample values: {df_cleaned['Ctr'].head(3).tolist()}")
+
                 df_cleaned["Ctr"] = (
                     df_cleaned["Ctr"].str.rstrip("%").astype(float) / 100
                 )
+
+                # DEBUG: Log CTR values after conversion
+                logger.debug(f"CTR after conversion - dtype: {df_cleaned['Ctr'].dtype}, sample values: {df_cleaned['Ctr'].head(3).tolist()}")
             except Exception as e:
-                logger.warning(f"Error converting 'Ctr' column to float: {e}")
+                logger.warning(f"Error converting 'Ctr' column to float: {e}. Leaving as is.")
 
         return df_cleaned
 

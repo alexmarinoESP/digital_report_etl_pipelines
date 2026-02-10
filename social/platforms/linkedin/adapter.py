@@ -195,6 +195,10 @@ class LinkedInAdapter:
     ) -> Optional[Dict[str, Any]]:
         """Get creative details for a specific creative.
 
+        LinkedIn API v202601 for creatives endpoint returns all fields by default,
+        including: id, campaign, status, type, intendedStatus, createdAt, lastModifiedAt.
+        The 'fields' parameter is NOT supported for the creatives endpoint.
+
         Args:
             account_id: Account ID (numeric string)
             creative_id: Creative ID (numeric string)
@@ -212,6 +216,8 @@ class LinkedInAdapter:
             creative_urn = self.http_client.format_creative_urn_encoded(creative_id)
             url = f"https://api.linkedin.com/rest/adAccounts/{account_id}/creatives/{creative_urn}"
 
+            # Note: Do NOT use 'fields' parameter - it's not supported by this endpoint
+            # API returns all fields by default
             response = self.http_client.get(url=url, params={})
 
             logger.debug(f"Retrieved creative {creative_id}")

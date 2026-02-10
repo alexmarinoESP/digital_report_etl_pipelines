@@ -1,0 +1,249 @@
+google_ads_violation:
+  queryget: [query_violation_policy]
+  type: SearchGoogleAdsRequest
+  processing:
+    handle_columns:
+      params: None
+    rename_columns:
+      params: None
+    dropna_value:
+      params: None
+    drop_duplicates:
+      params: None
+  scope: account
+  avoid_insert_data: True
+  send_alert:
+    recipients:
+      - DataScience@esprinet.com
+      - angeliki.kouroupi@esprinet.com
+    subject: 'Violation policy alert: Google ads'
+    message: 'This email contains information regarding ads that are labelled with LIMITED_APPROVAL status belonging to
+    campaign with status ENABLED.<br> For any additional information write to: DataScience@esprinet.com'
+
+
+#
+google_ads_placement:
+  queryget: [query_placement,query_placement_2]
+  type: SearchGoogleAdsRequest
+  processing:
+    rename_columns:
+      params: None
+    rename_placement_id:
+      params: None
+    add_row_loaded_date:
+      params: None
+    fill_view_ctr_nan:
+      cols: ['active_view_ctr']
+    dropna_value:
+      params: None
+    drop_duplicates:
+      params: None
+    limit_placement:
+      params: None
+    remove_emoji:
+      cols: ['display_name']
+    remove_non_latin:
+      cols: ['display_name']
+    remove_piping:
+      cols: ['display_name']
+  scope: account
+  day: 600
+  query:
+    column_name:
+      - id
+      - placement
+  truncate: True
+
+google_ads_ad_creatives:
+  queryget: [query_ads_ad_creatives]
+  type: SearchGoogleAdsStreamRequest
+  processing:
+    rename_columns:
+      params: None
+    handle_columns:
+      params: None
+    add_row_loaded_date:
+      params: None
+  scope: GoogleAdsService
+  query:
+    column_name:
+      - ad_id
+      - adgroup_id
+#
+#
+google_ads_campaign:
+  queryget: [query_campaign]
+  type: SearchGoogleAdsStreamRequest
+  processing:
+    handle_columns:
+      params: None
+    deal_with_date:
+      cols: ['startdate','enddate']
+    rename_columns:
+      params: None
+    modify_name:
+      cols: ['name']
+    add_row_loaded_date:
+      params: None
+    replace_nat:
+      params: None
+    delete_nan_string:
+      params: None
+    dropna_value:
+      params: None
+  scope: account
+  day: 150
+  query:
+    column_name:
+      - id
+  merge:
+    table_name_source: google_ads_campaign_source
+    fields_id:
+      - id
+    table_name_check:
+      - google_ads_campaign
+    fields_update:
+      - start_date
+      - end_date
+      - serving_status
+      - status
+      - name
+#
+google_ads_report:
+  queryget: [query_ad_report]
+  type: SearchGoogleAdsStreamRequest
+  processing:
+    rename_columns:
+      params: None
+    convert_costs:
+      col: ['cost_micros','costmicros','averagecpm','averagecost','averagecpc']
+    add_row_loaded_date:
+      params: None
+  scope: account
+  day: 150
+  query:
+    column_name:
+      - campaign_id
+      - adgroup_id
+      - ad_id
+      - date
+  merge:
+    table_name_source: google_ads_report_source
+    fields_id:
+      - campaign_id
+      - adgroup_id
+      - ad_id
+      - date
+    table_name_check:
+      - google_ads_report
+    fields_update:
+      - clicks
+      - impressions
+      - conversions
+      - costmicros
+      - averagecpm
+      - averagecpc
+      - averagecost
+      - ctr
+##
+##
+##
+#
+#
+#
+google_ads_audience:
+  queryget: [query_audience, query_audience_2]
+  type: SearchGoogleAdsRequest
+  processing:
+    rename_columns:
+      params: None
+    add_row_loaded_date:
+      params: None
+    clean_audience_string:
+      params: None
+  scope: SearchGoogleAdsRequest
+  query:
+    column_name:
+      - id
+      - display_name
+  truncate: True
+#
+##
+###
+##
+###
+##
+###
+google_ads_cost_by_device:
+  queryget: [query_by_device,query_by_device_2]
+  type: SearchGoogleAdsRequest
+  processing:
+    rename_columns:
+      params: None
+    handle_columns:
+      params: None
+    convert_costs:
+      col: ['cost_micros','costmicros','averagecpm','averagecost','averagecpc']
+    aggregate_by_keys:
+      params: None
+    add_row_loaded_date:
+      params: None
+    dropna_value:
+      params: None
+  scope: account
+  query:
+    column_name:
+      - ad_id
+      - device
+  update:
+    fields_id:
+      - ad_id
+      - device
+    fields_update:
+      - cost_micros
+      - clicks
+      - customer_id_google
+      - row_loaded_date
+# TEST TABLE - COMMENTED OUT FOR PRODUCTION
+# Uncomment this section for testing purposes only
+#google_ads_cost_by_device_test:
+#  queryget: [query_by_device,query_by_device_2]
+#  type: SearchGoogleAdsRequest
+#  processing:
+#    handle_columns:
+#      params: None
+#    rename_columns:
+#      params: None
+#    convert_costs:
+#      col: ['cost_micros','costmicros','averagecpm','averagecost','averagecpc']
+#    aggregate_by_keys:
+#      params: None
+#    add_row_loaded_date:
+#      params: None
+#    dropna_value:
+#      params: None
+#  scope: account
+#  query:
+#    column_name:
+#      - ad_id
+#      - device
+#  truncate: True  # This will empty the table before inserting new data
+
+####
+google_ads_account:
+  queryget:
+  request:
+  processing:
+    rename_columns:
+      params: None
+    handle_columns:
+      params: None
+    modify_name:
+      cols: ['descriptive_name']
+    add_row_loaded_date:
+      params: None
+  scope: account
+  query:
+    column_name:
+      - id
+  truncate: True

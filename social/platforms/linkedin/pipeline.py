@@ -492,6 +492,11 @@ class LinkedInPipeline:
     def _get_campaign_urns_from_db(self) -> pd.DataFrame:
         """Query database for campaign URNs for insights.
 
+        Uses business logic based on campaign dates and status:
+        - Active/Paused campaigns: always included
+        - Completed campaigns: only if ended in last 90 days
+        - Archived campaigns: excluded (no active data)
+
         Returns:
             DataFrame with campaign IDs
         """
@@ -504,7 +509,13 @@ class LinkedInPipeline:
         query = f"""
             SELECT DISTINCT id
             FROM GoogleAnalytics.linkedin_ads_campaign{table_suffix}
-            WHERE row_loaded_date >= CURRENT_DATE - {INSIGHTS_LOOKBACK_DAYS}
+            WHERE (
+                -- Always include active/paused campaigns
+                status IN ('ACTIVE', 'PAUSED', 'DRAFT')
+                -- Include completed campaigns if ended recently
+                OR (status = 'COMPLETED' AND (end_date IS NULL OR end_date >= CURRENT_DATE - 90))
+                -- Exclude archived campaigns (old, no active data)
+            )
         """
 
         try:
@@ -515,6 +526,9 @@ class LinkedInPipeline:
 
     def _get_creative_urns_from_db(self) -> pd.DataFrame:
         """Query database for creative URNs from insights.
+
+        Gets creatives that have recent activity (based on insights date dimension).
+        Uses the 'date' column (business date) instead of load_date (ETL metadata).
 
         Returns:
             DataFrame with creative IDs
@@ -528,7 +542,7 @@ class LinkedInPipeline:
         query = f"""
             SELECT DISTINCT creative_id AS id
             FROM GoogleAnalytics.linkedin_ads_insights{table_suffix}
-            WHERE row_loaded_date >= CURRENT_DATE - {INSIGHTS_LOOKBACK_DAYS}
+            WHERE date >= CURRENT_DATE - 90  -- Creatives with activity in last 90 days
             AND creative_id IS NOT NULL
         """
 

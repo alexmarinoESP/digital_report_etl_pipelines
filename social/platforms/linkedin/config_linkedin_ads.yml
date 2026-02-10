@@ -7,10 +7,12 @@ linkedin_ads_creative:
   type: CREATIVES
   q: criteria
   nested_element: ['servingHoldReasons']
-  #fields: ['id', 'campaign_id', 'name', 'intendedStatus', 'type', 'lastModifiedAt', 'createdAt', 'account']
+  # Note: LinkedIn API v202601+ no longer returns explicit 'type' field
+  # Type is inferred from flattened 'content' field columns (see processor)
   processing:
     extract_id_from_urn:
       columns: [id, campaign, account]  # MUST use 'columns' not 'cols'
+    extract_creative_type_from_content: None  # Extract type from content field
     rename_column:
       renaming:
         status: status_0
