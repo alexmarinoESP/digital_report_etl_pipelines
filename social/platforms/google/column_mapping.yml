@@ -181,10 +181,13 @@ google_ads_account:
   api_to_db:
     "customerClient.id": "id"
     "customerClient.descriptiveName": "descriptive_name"
+    "customerClient.descriptive_name": "descriptive_name"
     "customerClient.manager": "manager"
     "customerClient.status": "status"
     "customerClient.currencyCode": "currency_code"
+    "customerClient.currency_code": "currency_code"
     "customerClient.timeZone": "time_zone"
+    "customerClient.time_zone": "time_zone"
     "customerClient.level": "level"
   conversions:
     cost_fields: []

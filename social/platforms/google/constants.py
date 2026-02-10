@@ -25,7 +25,7 @@ COMPANY_ACCOUNT_MAP: Dict[str, int] = {
 # API Configuration
 # ============================================================================
 
-API_VERSION: str = "v18"
+API_VERSION: str = "v19"
 DEFAULT_LOOKBACK_DAYS: int = 150
 MICROS_DIVISOR: int = 1_000_000  # Google Ads costs are in micros (1/1,000,000 of currency)
 
