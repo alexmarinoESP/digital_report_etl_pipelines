@@ -48,4 +48,4 @@ RUN mkdir -p /app/data
 #   --companies it es vvit
 #   --sources mapp dynamics
 #   --years-behind 2
-CMD ["python", "-m", "newsletter.scripts.run_pipeline"]
+CMD ["python", "-m", "newsletter.scripts.run_pipeline", "--test-mode"]
