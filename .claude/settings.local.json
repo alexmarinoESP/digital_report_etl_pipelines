@@ -24,7 +24,11 @@
       "Bash(az containerapp job list:*)",
       "Bash(dir:*)",
       "Bash(findstr:*)",
-      "Bash(copy \"microsoft-ads-etl\\tokens.json\" \"tokens.json\")"
+      "Bash(copy \"microsoft-ads-etl\\tokens.json\" \"tokens.json\")",
+      "Bash(where.exe tokens.json)",
+      "Bash(.cleanup_project.ps1)",
+      "Bash(powershell:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []
