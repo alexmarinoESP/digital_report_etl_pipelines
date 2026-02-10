@@ -179,6 +179,7 @@ google_ads_cost_by_device:
 # Account table (hierarchy data)
 google_ads_account:
   api_to_db:
+    # With prefix
     "customerClient.id": "id"
     "customerClient.descriptiveName": "descriptive_name"
     "customerClient.descriptive_name": "descriptive_name"
@@ -189,6 +190,16 @@ google_ads_account:
     "customerClient.timeZone": "time_zone"
     "customerClient.time_zone": "time_zone"
     "customerClient.level": "level"
+    # Without prefix (API v19 returns these)
+    "id": "id"
+    "descriptiveName": "descriptive_name"
+    "manager": "manager"
+    "status": "status"
+    "currencyCode": "currency_code"
+    "timeZone": "time_zone"
+    "level": "level"
+    "clientCustomer": "client_customer"
+    "managerId": "manager_id"
   conversions:
     cost_fields: []
   metadata:
@@ -201,6 +212,8 @@ google_ads_account:
     - currency_code
     - time_zone
     - level
+    - client_customer
+    - manager_id
     - load_date
 
 # Violation (alert-only, no DB insert)
