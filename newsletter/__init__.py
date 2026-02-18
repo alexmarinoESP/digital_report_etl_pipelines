@@ -10,7 +10,7 @@ Architecture:
     ├── adapters/        # External service implementations
     │   ├── mapp_adapter.py      # Mapp Newsletter API
     │   ├── hcti_adapter.py      # HTML to image rendering
-    │   ├── s3_adapter.py        # S3/Minio storage
+    │   ├── azure_blob_adapter.py # Azure Blob Storage
     │   ├── local_storage_adapter.py  # Local filesystem
     │   └── repository_adapter.py     # Vertica database
     ├── services/        # Business logic
@@ -26,7 +26,7 @@ Architecture:
 Usage:
     from newsletter.pipeline import PipelineFactory
 
-    # Production (S3 storage)
+    # Production (Azure Blob storage)
     pipeline = PipelineFactory.create_default()
     result = pipeline.run()
 
@@ -93,8 +93,8 @@ if not re.search(r"win", platform):
 else:
     TMPDATA_PATH = os.path.join(_ROOT, "data")
 
-# Bucket name for S3/Minio
-BUCKET_NAME = get_env("S3_BUCKET_NAME", "report-digital-preview")
+# Azure Blob container name
+CONTAINER_NAME = get_env("AZURE_STORAGE_CONTAINER", "newsletter-images")
 
 # Load config
 config = get_config()
@@ -111,7 +111,7 @@ __all__ = [
     # Configuration
     "config",
     "TMPDATA_PATH",
-    "BUCKET_NAME",
+    "CONTAINER_NAME",
     # Domain models
     "Company",
     "Newsletter",
