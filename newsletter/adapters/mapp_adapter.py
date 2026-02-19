@@ -20,6 +20,11 @@ class MappApiError(Exception):
     pass
 
 
+class RecipientNotFoundError(MappApiError):
+    """Exception raised when Mapp recipient/contact does not exist."""
+    pass
+
+
 class MappAdapter(IMappClient):
     """
     Adapter for Mapp Newsletter API.
@@ -99,12 +104,26 @@ class MappAdapter(IMappClient):
                 },
                 auth=self._auth,
             )
+
+            # Check for "recipient not found" before raise_for_status
+            if response.status_code == 400:
+                try:
+                    error_data = response.json()
+                    if "does not exist" in error_data.get("message", ""):
+                        raise RecipientNotFoundError(
+                            f"Recipient not found: {error_data.get('message')}"
+                        )
+                except (ValueError, KeyError):
+                    pass
+
             response.raise_for_status()
 
             if "json" in response.headers.get("Content-Type", ""):
                 return response.json()
             return None
 
+        except RecipientNotFoundError:
+            raise
         except requests.RequestException as e:
             logger.error(f"Mapp API request failed: {e}")
             raise MappApiError(f"Request failed: {e}") from e
@@ -165,9 +184,14 @@ class MappAdapter(IMappClient):
 
         Returns:
             Dictionary with htmlVersion and externalId, or None
+
+        Raises:
+            RecipientNotFoundError: If the contact does not exist in Mapp
         """
         try:
             params = {"messageId": message_id, "contactId": contact_id}
             return self._request(self.ENDPOINT_PREVIEW, params)
+        except RecipientNotFoundError:
+            raise
         except MappApiError:
             return None

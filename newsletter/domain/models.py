@@ -49,6 +49,7 @@ class Newsletter:
     html_content: Optional[str] = None
     message_id: Optional[int] = None
     contact_id: Optional[int] = None
+    contact_id_2: Optional[int] = None  # fallback contact (min USER_ID)
     image_name: Optional[str] = None
 
     def __post_init__(self):
