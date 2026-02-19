@@ -163,9 +163,7 @@ class ExtractionService:
                         if nl.has_content:
                             stats.add_processed()
                         else:
-                            stats.add_failed(
-                                f"No content for Mapp newsletter {nl.newsletter_id}"
-                            )
+                            stats.add_skipped()
 
                 all_newsletters.extend(newsletters)
 
