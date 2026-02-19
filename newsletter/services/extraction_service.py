@@ -9,6 +9,7 @@ from loguru import logger
 
 from newsletter.domain.models import Newsletter, Company, PipelineStats
 from newsletter.domain.interfaces import INewsletterRepository, IMappClient, ExtractionError
+from newsletter.adapters.mapp_adapter import RecipientNotFoundError
 
 
 class ExtractionService:
@@ -46,11 +47,29 @@ class ExtractionService:
         """
         self._mapp_clients[company] = client
 
+    def _try_get_preview(
+        self, client: IMappClient, message_id: int, contact_id: int
+    ) -> Optional[dict]:
+        """
+        Try to get preview data for a single contact ID.
+
+        Returns:
+            Preview data dict or None if not available.
+
+        Raises:
+            RecipientNotFoundError: If the contact does not exist in Mapp.
+        """
+        return client.get_preview_data(
+            message_id=message_id,
+            contact_id=contact_id,
+        )
+
     def _enrich_mapp_newsletter(
         self, newsletter: Newsletter, client: IMappClient
     ) -> Newsletter:
         """
         Enrich a Mapp newsletter with HTML content.
+        Uses fallback logic: tries contact_id first, then contact_id_2.
 
         Args:
             newsletter: Newsletter to enrich
@@ -65,24 +84,41 @@ class ExtractionService:
             )
             return newsletter
 
-        try:
-            # Get preview data
-            data = client.get_preview_data(
-                message_id=newsletter.message_id,
-                contact_id=newsletter.contact_id,
-            )
+        # Build list of contact IDs to try (primary, then fallback)
+        contact_ids = [newsletter.contact_id]
+        if newsletter.contact_id_2 and newsletter.contact_id_2 != newsletter.contact_id:
+            contact_ids.append(newsletter.contact_id_2)
 
-            if data:
-                newsletter.html_content = data.get("htmlVersion", "")
-                external_id = data.get("externalId")
-                if external_id:
-                    newsletter.image_name = f"{external_id}.png"
+        for i, cid in enumerate(contact_ids):
+            try:
+                data = self._try_get_preview(client, newsletter.message_id, cid)
+                if data:
+                    newsletter.html_content = data.get("htmlVersion", "")
+                    external_id = data.get("externalId")
+                    if external_id:
+                        newsletter.image_name = f"{external_id}.png"
+                    if i > 0:
+                        logger.debug(
+                            f"Fallback contact_id_2 worked for {newsletter.newsletter_id}"
+                        )
+                    return newsletter
 
-        except Exception as e:
-            logger.warning(
-                f"Failed to enrich newsletter {newsletter.newsletter_id}: {e}"
-            )
+            except RecipientNotFoundError:
+                label = "contact_id" if i == 0 else "contact_id_2"
+                logger.debug(
+                    f"Recipient {cid} ({label}) not found for {newsletter.newsletter_id}"
+                )
+                continue
 
+            except Exception as e:
+                logger.warning(
+                    f"Failed to enrich newsletter {newsletter.newsletter_id}: {e}"
+                )
+                return newsletter
+
+        logger.warning(
+            f"All contact IDs exhausted for newsletter {newsletter.newsletter_id}, skipping"
+        )
         return newsletter
 
     def extract_newsletters(
@@ -127,9 +163,7 @@ class ExtractionService:
                         if nl.has_content:
                             stats.add_processed()
                         else:
-                            stats.add_failed(
-                                f"No content for Mapp newsletter {nl.newsletter_id}"
-                            )
+                            stats.add_skipped()
 
                 all_newsletters.extend(newsletters)
 

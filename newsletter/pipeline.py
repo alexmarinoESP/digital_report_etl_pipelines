@@ -72,7 +72,7 @@ class NewsletterPipeline:
     Coordinates the three stages:
     1. Extraction - Get newsletter data from sources
     2. Rendering - Convert HTML to images
-    3. Upload - Store images in S3/Minio
+    3. Upload - Store images in Azure Blob Storage
 
     Follows:
     - Single Responsibility: Only orchestrates, delegates to services
@@ -294,37 +294,37 @@ class PipelineFactory:
     @staticmethod
     def create_default() -> NewsletterPipeline:
         """
-        Create pipeline with default production dependencies (S3 storage).
+        Create pipeline with default production dependencies (Azure Blob storage).
 
         Returns:
             Configured NewsletterPipeline instance
         """
-        from newsletter.adapters import S3StorageAdapter
+        from newsletter.adapters import AzureBlobStorageAdapter
 
-        storage = S3StorageAdapter()
+        storage = AzureBlobStorageAdapter()
         return PipelineFactory._create_pipeline(storage)
 
     @staticmethod
     def create_with_test_storage(test_folder: str = "test-images") -> NewsletterPipeline:
         """
-        Create pipeline with test storage folder (S3).
+        Create pipeline with test storage folder (Azure Blob).
 
         Args:
-            test_folder: Folder name for test uploads on S3
+            test_folder: Folder name for test uploads on Azure Blob
 
         Returns:
             Configured NewsletterPipeline instance
         """
-        from newsletter.adapters import S3StorageAdapter
+        from newsletter.adapters import AzureBlobStorageAdapter
 
-        storage = S3StorageAdapter(folder=test_folder)
+        storage = AzureBlobStorageAdapter(folder=test_folder)
         return PipelineFactory._create_pipeline(storage)
 
     @staticmethod
     def create_with_local_storage(output_folder: str) -> NewsletterPipeline:
         """
         Create pipeline with local filesystem storage.
-        Use this for testing without S3/Minio connection.
+        Use this for testing without Azure Blob connection.
 
         Args:
             output_folder: Local folder path for saving images

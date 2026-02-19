@@ -190,6 +190,7 @@ class NewsletterRepositoryAdapter(INewsletterRepository):
                     source="mapp",
                     message_id=int(row.get("MESSAGE_ID", 0)) if row.get("MESSAGE_ID") else None,
                     contact_id=int(row.get("CONTACT_ID", 0)) if row.get("CONTACT_ID") else None,
+                    contact_id_2=int(row.get("CONTACT_ID_2", 0)) if row.get("CONTACT_ID_2") else None,
                 )
                 newsletters.append(newsletter)
 

@@ -1,65 +1,71 @@
 """
-S3/Minio storage adapter.
-Implements IImageStorage interface for S3-compatible storage.
+Azure Blob Storage adapter.
+Implements IImageStorage interface for Azure Blob Storage.
 """
 
 import io
 from typing import List, Optional
 
+from azure.storage.blob import BlobServiceClient, ContentSettings
 from PIL import Image
 from loguru import logger
 
 from newsletter.domain.interfaces import IImageStorage
-from shared.storage.s3_handler import S3Handler
-from shared.utils.env import get_env
+from shared.utils.env import get_env, get_env_or_raise
 
 
-class S3StorageAdapter(IImageStorage):
+class AzureBlobStorageAdapter(IImageStorage):
     """
-    Adapter for S3/Minio image storage.
+    Adapter for Azure Blob Storage image storage.
     Implements IImageStorage interface.
-
-    Follows:
-    - Single Responsibility: Only handles image storage operations
-    - Dependency Inversion: Implements abstract interface
-    - Liskov Substitution: Can be swapped with any IImageStorage implementation
     """
 
     def __init__(
         self,
-        bucket_name: Optional[str] = None,
+        container_name: Optional[str] = None,
         folder: Optional[str] = None,
-        s3_handler: Optional[S3Handler] = None,
+        connection_string: Optional[str] = None,
     ):
         """
-        Initialize S3 storage adapter.
+        Initialize Azure Blob storage adapter.
 
         Args:
-            bucket_name: S3 bucket name (from env S3_BUCKET_NAME if not provided)
-            folder: Target folder in bucket (from env S3_FOLDER if not provided)
-            s3_handler: Optional S3Handler instance (creates new if not provided)
+            container_name: Azure Blob container name (env AZURE_STORAGE_CONTAINER if not provided)
+            folder: Target folder/prefix in container (env AZURE_STORAGE_FOLDER if not provided)
+            connection_string: Azure Storage connection string (env AZURE_STORAGE_CONNECTION_STRING if not provided)
         """
-        self._bucket_name = bucket_name or get_env(
-            "S3_BUCKET_NAME", "report-digital-preview"
+        self._container_name = container_name or get_env(
+            "AZURE_STORAGE_CONTAINER", "newsletter-images"
         )
         self._folder = folder or get_env(
-            "S3_FOLDER", "correct-images"
+            "AZURE_STORAGE_FOLDER", "correct-images"
         )
-        self._s3 = s3_handler or S3Handler()
+
+        conn_str = connection_string or get_env_or_raise("AZURE_STORAGE_CONNECTION_STRING")
+        self._blob_service = BlobServiceClient.from_connection_string(conn_str)
+        self._container_client = self._blob_service.get_container_client(self._container_name)
         self._existing_cache: Optional[List[str]] = None
 
+        # Ensure container exists
+        try:
+            self._container_client.get_container_properties()
+        except Exception:
+            self._container_client.create_container()
+            logger.info(f"Created Azure Blob container '{self._container_name}'")
+
     def _get_full_path(self, image_name: str) -> str:
-        """Get full S3 path for an image."""
+        """Get full blob path for an image."""
         if self._folder:
             return f"{self._folder}/{image_name}"
         return image_name
 
     def _refresh_cache(self) -> None:
         """Refresh the cache of existing images."""
-        self._existing_cache = self._s3.list_objects_in_folder(
-            bucket_name=self._bucket_name,
-            folder_name=self._folder,
-        )
+        prefix = f"{self._folder}/" if self._folder else ""
+        blobs = self._container_client.list_blobs(name_starts_with=prefix)
+        self._existing_cache = [
+            blob.name.replace(prefix, "", 1) for blob in blobs
+        ]
         logger.debug(f"Cached {len(self._existing_cache)} existing images")
 
     def list_existing(self, folder: str = "") -> List[str]:
@@ -77,10 +83,9 @@ class S3StorageAdapter(IImageStorage):
         if target_folder == self._folder and self._existing_cache is not None:
             return self._existing_cache
 
-        images = self._s3.list_objects_in_folder(
-            bucket_name=self._bucket_name,
-            folder_name=target_folder,
-        )
+        prefix = f"{target_folder}/" if target_folder else ""
+        blobs = self._container_client.list_blobs(name_starts_with=prefix)
+        images = [blob.name.replace(prefix, "", 1) for blob in blobs]
 
         if target_folder == self._folder:
             self._existing_cache = images
@@ -122,16 +127,15 @@ class S3StorageAdapter(IImageStorage):
             # Get full path
             full_path = self._get_full_path(image_name)
 
-            # Upload using minio client directly for bytes
-            self._s3.client.put_object(
-                bucket_name=self._bucket_name,
-                object_name=full_path,
-                data=buffer,
-                length=buffer.getbuffer().nbytes,
-                content_type="image/png",
+            # Upload to Azure Blob
+            blob_client = self._container_client.get_blob_client(full_path)
+            blob_client.upload_blob(
+                buffer,
+                overwrite=True,
+                content_settings=ContentSettings(content_type="image/png"),
             )
 
-            logger.info(f"Uploaded {image_name} to {self._bucket_name}/{full_path}")
+            logger.info(f"Uploaded {image_name} to {self._container_name}/{full_path}")
 
             # Update cache
             if self._existing_cache is not None:
