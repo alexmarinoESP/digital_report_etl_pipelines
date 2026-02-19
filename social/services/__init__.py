@@ -1,5 +1,6 @@
-"""Social services module."""
+"""Social services module.
 
-from social.services.alert_service import Alert, send_alert
+This module is currently empty as all services have been removed.
+"""
 
-__all__ = ["Alert", "send_alert"]
+__all__ = []

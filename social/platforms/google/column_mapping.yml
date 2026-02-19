@@ -71,9 +71,9 @@ google_ads_campaign:
     "campaign.name": "name"
     "campaign.status": "status"
     "campaign.servingStatus": "serving_status"
-    # Date fields - MessageToDict returns camelCase
-    "campaign.startDate": "start_date"
-    "campaign.endDate": "end_date"
+    # Date fields - MessageToDict returns camelCase (v23: start_date_time / end_date_time)
+    "campaign.startDateTime": "start_date"
+    "campaign.endDateTime": "end_date"
   conversions:
     cost_fields: []
   metadata:
@@ -98,17 +98,22 @@ google_ads_report:
     "adGroup.id": "adgroup_id"
     "adGroupAd.ad.id": "ad_id"
     "segments.date": "date"
-    # Metrics
+    # Metrics - camelCase (API v18)
     "metrics.clicks": "clicks"
     "metrics.impressions": "impressions"
     "metrics.conversions": "conversions"
-    "metrics.costMicros": "cost_micros"
+    "metrics.costMicros": "costmicros"
     "metrics.ctr": "ctr"
-    "metrics.averageCpc": "average_cpc"
-    "metrics.averageCpm": "average_cpm"
-    "metrics.averageCost": "average_cost"
+    "metrics.averageCpc": "averagecpc"
+    "metrics.averageCpm": "averagecpm"
+    "metrics.averageCost": "averagecost"
+    # Metrics - snake_case (API v19)
+    "metrics.cost_micros": "costmicros"
+    "metrics.average_cpc": "averagecpc"
+    "metrics.average_cpm": "averagecpm"
+    "metrics.average_cost": "averagecost"
   conversions:
-    cost_fields: ["cost_micros", "average_cpc", "average_cpm", "average_cost"]
+    cost_fields: ["costmicros", "averagecpc", "averagecpm", "averagecost"]
   metadata:
     add_load_date: false  # Report uses 'date' instead of 'load_date'
   db_columns_source:
@@ -119,10 +124,10 @@ google_ads_report:
     - clicks
     - impressions
     - conversions
-    - cost_micros
-    - average_cpm
-    - average_cpc
-    - average_cost
+    - costmicros
+    - averagecpm
+    - averagecpc
+    - averagecost
     - ctr
     - customer_id_google
   db_columns_target:
@@ -133,10 +138,10 @@ google_ads_report:
     - clicks
     - impressions
     - conversions
-    - cost_micros
-    - average_cpm
-    - average_cpc
-    - average_cost
+    - costmicros
+    - averagecpm
+    - averagecpc
+    - averagecost
     - ctr
     - customer_id_google
 

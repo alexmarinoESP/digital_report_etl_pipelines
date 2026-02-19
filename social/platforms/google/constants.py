@@ -25,7 +25,7 @@ COMPANY_ACCOUNT_MAP: Dict[str, int] = {
 # API Configuration
 # ============================================================================
 
-API_VERSION: str = "v19"
+API_VERSION: str = "v23"
 DEFAULT_LOOKBACK_DAYS: int = 150
 MICROS_DIVISOR: int = 1_000_000  # Google Ads costs are in micros (1/1,000,000 of currency)
 
@@ -50,8 +50,8 @@ GAQL_QUERIES: Dict[str, str] = {
 
     # Campaign query - basic campaign information
     "query_campaign": """
-        SELECT campaign.start_date,
-        campaign.end_date, campaign.name,
+        SELECT campaign.start_date_time,
+        campaign.end_date_time, campaign.name,
         campaign.id, campaign.serving_status,
         customer.id, campaign.status
         FROM campaign
@@ -191,9 +191,13 @@ COLUMN_MAPPINGS: Dict[str, str] = {
     "campaign.status": "status",
     "campaign.start_date": "start_date",
     "campaign.end_date": "end_date",
+    "campaign.start_date_time": "start_date",
+    "campaign.end_date_time": "end_date",
     "campaign.serving_status": "serving_status",
     "campaign.startDate": "start_date",
     "campaign.endDate": "end_date",
+    "campaign.startDateTime": "start_date",
+    "campaign.endDateTime": "end_date",
     "campaign.servingStatus": "serving_status",
     "campaignId": "campaign_id",
     "campaignName": "campaign_name",

@@ -275,8 +275,8 @@ class GoogleHTTPClient:
         Convert streaming response to DataFrame.
 
         Streaming responses return data in batches. This method:
-        1. Extracts the first result from stored response
-        2. Converts Protobuf to dict using MessageToDict
+        1. Iterates ALL batches from the streaming response
+        2. Converts Protobuf to dict using MessageToDict (including default values)
         3. Normalizes nested JSON into flat DataFrame
         4. Returns empty DataFrame if no results
 
@@ -287,11 +287,21 @@ class GoogleHTTPClient:
             DataFrame with normalized results
         """
         try:
-            # Access stored first result from streaming iterator
-            dict_obj = MessageToDict(response._stored_first_result._pb)
+            all_results = []
 
-            if "results" in dict_obj:
-                df = pd.json_normalize(dict_obj["results"])
+            for batch in response:
+                # Convert each batch to dict, including default/zero values
+                # (prevents fields like segments.date from being dropped)
+                batch_dict = MessageToDict(
+                    batch._pb,
+                    always_print_fields_with_no_presence=True,
+                    preserving_proto_field_name=False,
+                )
+                if "results" in batch_dict:
+                    all_results.extend(batch_dict["results"])
+
+            if all_results:
+                df = pd.json_normalize(all_results)
             else:
                 df = pd.DataFrame()
 
@@ -322,8 +332,12 @@ class GoogleHTTPClient:
 
             # Convert response to list (handles both single and paginated responses)
             for row in response:
-                # Convert Protobuf message to dict
-                row_dict = MessageToDict(row._pb)
+                # Convert Protobuf message to dict, including default/zero values
+                row_dict = MessageToDict(
+                    row._pb,
+                    always_print_fields_with_no_presence=True,
+                    preserving_proto_field_name=False,
+                )
                 all_results.append(row_dict)
 
             if all_results:

@@ -28,7 +28,8 @@
       "Bash(where.exe tokens.json)",
       "Bash(.cleanup_project.ps1)",
       "Bash(powershell:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(Select-String -Pattern '(column_name|date|campaign|adgroup|ad_id|clicks|impressions|conversions|costmicros|averagecpm|averagecpc|averagecost|ctr|customer|load|row|last|---)')"
     ],
     "deny": [],
     "ask": []

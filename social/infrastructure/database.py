@@ -757,7 +757,10 @@ class VerticaDataSink:
         for row_values in df.values.tolist():
             escaped_values = []
             for val in row_values:
-                if isinstance(val, str):
+                # Convert NaN/None to 'None' string (matches COPY null value)
+                if pd.isna(val) or val is None:
+                    escaped_values.append('None')
+                elif isinstance(val, str):
                     # Escape special characters (backslash first, then pipe)
                     escaped_val = val
                     for char, replacement in ESCAPE_CHARS.items():

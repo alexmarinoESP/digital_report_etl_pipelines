@@ -488,7 +488,9 @@ class GooglePipeline:
             elif table_config.get("merge"):
                 # Legacy: 'merge' config → map to 'upsert'
                 load_mode = "upsert"
-                logger.debug(f"Using upsert mode for {table_name} (legacy 'merge' config)")
+                merge_config = table_config["merge"]
+                pk_columns = merge_config.get("fields_id")
+                logger.debug(f"Using upsert mode for {table_name} (legacy 'merge' config), PK={pk_columns}")
 
             elif table_config.get("append"):
                 # APPEND mode with explicit PK columns

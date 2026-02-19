@@ -47,7 +47,7 @@ newsletter = [
 # Dipendenze specifiche per social
 social = [
     "facebook-business>=19.0.0",
-    "google-ads>=27.0.0,<28.0.0",
+    "google-ads>=28.0.0",
     "bingads>=13.0.26",
     "psycopg2-binary>=2.9.0",
     "proto-plus>=1.22.0",
