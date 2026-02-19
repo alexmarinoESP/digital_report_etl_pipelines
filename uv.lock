@@ -1188,15 +1188,9 @@ dependencies = [
     { name = "protobuf" },
     { name = "pyyaml" },
 ]
-<<<<<<< HEAD
 sdist = { url = "https://files.pythonhosted.org/packages/2f/fc/79685281e19a8e12f32cbc6dfb3dbc361afabd887b836ddb31b38cfbee2c/google_ads-29.1.0.tar.gz", hash = "sha256:7301c88d2f72e0e9fdfd6c86818781bd242a30ed11fce1230ba1f929e7131c9a", size = 9428605 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/90/4f/61aad275e6331bbe02655fe6888a97485c47cfa63b2cecddc897be1d93b6/google_ads-29.1.0-py3-none-any.whl", hash = "sha256:afef285f93db10606595afc811ee4f0fda739047dab38341207eb128acd8c7c6", size = 18109318 },
-=======
-sdist = { url = "https://files.pythonhosted.org/packages/93/4f/7d56b61b0fc39c12b24002d88a6b566b3b94af12b6fe1ca65cad6046bab6/google_ads-27.0.0.tar.gz", hash = "sha256:c6c6265f2e5d91caac6426bdae2a17bd104f38cafff21b1e2def01a994bc0131", size = 6885269, upload-time = "2025-06-04T19:21:59.132Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/1b/da/0377b882cdf029e4e5bdd7b73cac726e038b18a4d7989bdd703a58f429df/google_ads-27.0.0-py3-none-any.whl", hash = "sha256:4c8c9570b49b57fa1e90c7f90f2a9c6d399ae0ebd05f3a8dd8de4593a2f446ae", size = 13308493, upload-time = "2025-06-04T19:21:56.367Z" },
->>>>>>> e3c25c4588866db2d6098fa4048b317c11d6db77
 ]
 
 [[package]]
