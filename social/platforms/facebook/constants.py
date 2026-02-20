@@ -156,13 +156,13 @@ except ImportError:
     }
 
 # Rate limiting configuration
-RATE_LIMIT_DELAY_SECONDS = 10  # Delay between API calls to avoid rate limits
+RATE_LIMIT_DELAY_SECONDS = 15  # Delay between API calls to avoid rate limits
 MAX_RETRIES = 3  # Maximum number of retries for failed requests
-BACKOFF_FACTOR = 2  # Exponential backoff factor (10s, 20s, 40s)
+BACKOFF_FACTOR = 2  # Exponential backoff factor (15s, 30s, 60s)
 
 # Date chunking configuration
 # Facebook API has data size limits, so large date ranges need chunking
-DATE_CHUNK_DAYS = 180  # Split large date ranges into 180-day chunks (reduced API calls)
+DATE_CHUNK_DAYS = 120  # Split large date ranges into 120-day chunks (balance between speed and rate limits)
 MAX_DATE_RANGE_DAYS = 730  # Maximum 2 years of historical data
 
 # Default pagination settings

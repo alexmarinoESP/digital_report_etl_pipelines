@@ -541,9 +541,9 @@ class FacebookProcessor:
             Self for chaining
         """
         if self.df.empty or actions_column not in self.df.columns:
-            logger.warning(f"Column '{actions_column}' not found in DataFrame")
+            logger.warning(f"Column '{actions_column}' not found in DataFrame - no actions in this period")
             # Create empty DataFrame with expected schema for fb_ads_insight_actions
-            self.df = pd.DataFrame(columns=['ad_id', 'action_type', 'action_target_id', 'value'])
+            self.df = pd.DataFrame(columns=['ad_id', 'action_type', 'action_target_id', 'value', 'conversion_id'])
             return self
 
         logger.info("Converting actions to long format DataFrame")

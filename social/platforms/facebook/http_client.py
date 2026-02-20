@@ -344,20 +344,40 @@ class FacebookHTTPClient:
             chunk_params.setdefault("level", "ad")
             chunk_params.setdefault("action_attribution_windows", ["7d_click", "1d_view"])
 
-            try:
-                insights = self.get_insights(account_id, fields, chunk_params)
-                all_insights.extend(insights)
-                logger.info(f"Chunk received with {len(insights)} records")
+            # Retry logic for rate-limited chunks
+            retry_count = 0
+            chunk_success = False
 
-                # Add rate limit delay between chunks (not after the last one)
-                if idx < len(chunks) - 1:
-                    logger.debug(f"Waiting {RATE_LIMIT_DELAY_SECONDS}s before next chunk...")
-                    time.sleep(RATE_LIMIT_DELAY_SECONDS)
+            while retry_count < MAX_RETRIES and not chunk_success:
+                try:
+                    insights = self.get_insights(account_id, fields, chunk_params)
+                    all_insights.extend(insights)
+                    logger.info(f"Chunk received with {len(insights)} records")
+                    chunk_success = True
 
-            except APIError as e:
-                logger.error(f"Failed to fetch chunk {chunk['since']}-{chunk['until']}: {e}")
-                # Continue with other chunks instead of failing completely
-                continue
+                    # Add rate limit delay between chunks (not after the last one)
+                    if idx < len(chunks) - 1:
+                        logger.debug(f"Waiting {RATE_LIMIT_DELAY_SECONDS}s before next chunk...")
+                        time.sleep(RATE_LIMIT_DELAY_SECONDS)
+
+                except APIError as e:
+                    retry_count += 1
+
+                    # Check if it's a transient rate limit error
+                    error_msg = str(e)
+                    is_rate_limit = "rate limit" in error_msg.lower() or "too many" in error_msg.lower() or "error_subcode" in error_msg.lower()
+
+                    if is_rate_limit and retry_count < MAX_RETRIES:
+                        # Exponential backoff: 10s, 20s, 40s
+                        backoff_delay = RATE_LIMIT_DELAY_SECONDS * (BACKOFF_FACTOR ** (retry_count - 1))
+                        logger.warning(
+                            f"Rate limit hit for chunk {chunk['since']}-{chunk['until']}. "
+                            f"Retry {retry_count}/{MAX_RETRIES} after {backoff_delay}s backoff..."
+                        )
+                        time.sleep(backoff_delay)
+                    else:
+                        logger.error(f"Failed to fetch chunk {chunk['since']}-{chunk['until']} after {retry_count} retries: {e}")
+                        break  # Exit retry loop, continue to next chunk
 
         logger.success(f"Retrieved {len(all_insights)} total insight records from {len(chunks)} chunks")
         return all_insights
