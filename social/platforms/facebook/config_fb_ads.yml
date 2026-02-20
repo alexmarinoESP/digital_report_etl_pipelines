@@ -50,6 +50,12 @@ fb_ads_insight:
     add_row_loaded_date:
       params: None
 
+  upsert:
+    pk_columns:
+      - campaign_id
+      - adset_id
+      - ad_id
+      - account_id
   query:
     column_name:
       - campaign_id

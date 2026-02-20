@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from social.core.config import ConfigurationManager
 from social.infrastructure.database import VerticaDataSink
-from social.infrastructure.database_token_provider import DatabaseTokenProvider
+from social.infrastructure.vertica_token_provider import VerticaTokenProvider
 from social.platforms.linkedin_posts.pipeline import LinkedInPostsPipeline, load_config
 
 
@@ -39,7 +39,7 @@ def run_pipeline(
     test_mode: bool = False,
     max_posts_per_org: Optional[int] = None,
     dry_run: bool = False,
-) -> None:
+) -> int:
     """Run the LinkedIn Organic Posts ETL pipeline.
 
     Args:
@@ -47,6 +47,9 @@ def run_pipeline(
         test_mode: If True, use test database and limit data
         max_posts_per_org: Maximum posts per organization
         dry_run: If True, don't write to database
+
+    Returns:
+        Exit code (0 = success, non-zero = error)
     """
     logger.info("=" * 60)
     logger.info("LinkedIn Organic Posts ETL Pipeline")
@@ -69,10 +72,14 @@ def run_pipeline(
                 test_mode=test_mode
             )
 
-        # Initialize token provider
-        token_provider = DatabaseTokenProvider(
+        # Initialize token provider (reads tokens from Vertica)
+        token_provider = VerticaTokenProvider(
             platform="linkedin",
-            data_sink=VerticaDataSink(config=db_config.database, test_mode=test_mode)
+            host=db_config.database.host,
+            user=db_config.database.user,
+            password=db_config.database.password,
+            database=db_config.database.database,
+            schema="ESPDM",  # Schema where tokens are stored
         )
 
         # Initialize pipeline
@@ -103,12 +110,14 @@ def run_pipeline(
         # Clean up
         pipeline.close()
 
+        return 0  # Success
+
     except Exception as e:
         logger.error(f"Pipeline failed: {e}")
-        raise
+        return 1  # Failure
 
 
-def main():
+def main() -> int:
     """Main entry point for command line execution."""
     parser = argparse.ArgumentParser(
         description="Run LinkedIn Organic Posts ETL Pipeline"
@@ -149,13 +158,15 @@ def main():
         logger.remove()
         logger.add(sys.stderr, level="INFO")
 
-    run_pipeline(
+    exit_code = run_pipeline(
         tables=args.tables,
         test_mode=args.test,
         max_posts_per_org=args.max_posts,
         dry_run=args.dry_run,
     )
 
+    return exit_code
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
