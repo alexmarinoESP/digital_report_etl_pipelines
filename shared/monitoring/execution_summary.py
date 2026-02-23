@@ -345,11 +345,14 @@ class ExecutionSummaryWriter:
         """
         # Lazy-load Azure SDK
         if self._blob_service is None:
-            from azure.storage.blob import BlobServiceClient
+            from azure.storage.blob import BlobServiceClient, ContentSettings
 
             self._blob_service = BlobServiceClient.from_connection_string(
                 self.storage_connection_string
             )
+        else:
+            # Import ContentSettings if already initialized
+            from azure.storage.blob import ContentSettings
 
         # Generate unique blob path
         blob_path = self._generate_blob_path()
@@ -375,9 +378,7 @@ class ExecutionSummaryWriter:
         blob_client.upload_blob(
             summary_json,
             overwrite=True,
-            content_settings={
-                "content_type": "application/json",
-            },
+            content_settings=ContentSettings(content_type="application/json"),
         )
 
         logger.success(f"Summary uploaded to blob: {blob_path}")

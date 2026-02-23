@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Social Pipelines Report</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 600;
+        }
+        .header .date {
+            margin-top: 10px;
+            font-size: 16px;
+            opacity: 0.9;
+        }
+        .summary {
+            padding: 30px;
+            background-color: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .summary h2 {
+            margin-top: 0;
+            color: #333;
+            font-size: 20px;
+            margin-bottom: 20px;
+        }
+        .stats {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        .stat-card {
+            flex: 1;
+            min-width: 150px;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .stat-card.success {
+            background-color: #d4edda;
+            border-left: 4px solid #28a745;
+        }
+        .stat-card.warning {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+        }
+        .stat-card.error {
+            background-color: #f8d7da;
+            border-left: 4px solid #dc3545;
+        }
+        .stat-card.info {
+            background-color: #d1ecf1;
+            border-left: 4px solid #17a2b8;
+        }
+        .stat-card .number {
+            font-size: 32px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .stat-card .label {
+            font-size: 14px;
+            color: #6c757d;
+            text-transform: uppercase;
+        }
+        .details {
+            padding: 30px;
+        }
+        .details h2 {
+            color: #333;
+            font-size: 20px;
+            margin-bottom: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        th {
+            background-color: #667eea;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #dee2e6;
+            font-size: 14px;
+        }
+        tr:hover {
+            background-color: #f8f9fa;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .status-badge.success {
+            background-color: #28a745;
+            color: white;
+        }
+        .status-badge.partial {
+            background-color: #ffc107;
+            color: #333;
+        }
+        .status-badge.failed {
+            background-color: #dc3545;
+            color: white;
+        }
+        .platform-icon {
+            display: inline-block;
+            width: 24px;
+            height: 24px;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+        .footer {
+            padding: 20px 30px;
+            background-color: #f8f9fa;
+            text-align: center;
+            font-size: 12px;
+            color: #6c757d;
+        }
+        .alert {
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .alert.warning {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            color: #856404;
+        }
+        .alert.error {
+            background-color: #f8d7da;
+            border-left: 4px solid #dc3545;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>📊 Social Pipelines Daily Report</h1>
+            <div class="date">{{TodayDate}}</div>
+        </div>
+
+        <!-- Summary Stats -->
+        <div class="summary">
+            <h2>Execution Summary</h2>
+            <div class="stats">
+                <div class="stat-card info">
+                    <div class="number">{{TotalPlatforms}}</div>
+                    <div class="label">Total Platforms</div>
+                </div>
+                <div class="stat-card success">
+                    <div class="number">{{SuccessCount}}</div>
+                    <div class="label">✅ Success</div>
+                </div>
+                <div class="stat-card warning">
+                    <div class="number">{{PartialCount}}</div>
+                    <div class="label">⚠️ Partial</div>
+                </div>
+                <div class="stat-card error">
+                    <div class="number">{{FailedCount}}</div>
+                    <div class="label">❌ Failed</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Alert for missing platforms (if any) -->
+        {{#if MissingPlatforms}}
+        <div class="details">
+            <div class="alert warning">
+                <strong>⚠️ Warning:</strong> Missing execution summaries for: <strong>{{MissingPlatforms}}</strong>
+                <br>These platforms may not have run or failed before writing summary.
+            </div>
+        </div>
+        {{/if}}
+
+        <!-- Alert for failures (if any) -->
+        {{#if HasFailures}}
+        <div class="details">
+            <div class="alert error">
+                <strong>❌ Action Required:</strong> One or more pipelines have failed. Please check the details below and investigate.
+            </div>
+        </div>
+        {{/if}}
+
+        <!-- Platform Details Table -->
+        <div class="details">
+            <h2>Platform Details</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Platform</th>
+                        <th>Status</th>
+                        <th>Tables</th>
+                        <th>Total Rows</th>
+                        <th>Duration</th>
+                        <th>Exit Code</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Facebook -->
+                    <tr>
+                        <td>
+                            <span class="platform-icon">📘</span>
+                            <strong>Facebook Ads</strong>
+                        </td>
+                        <td>
+                            <span class="status-badge {{FacebookStatus}}">{{FacebookStatus}}</span>
+                        </td>
+                        <td>{{FacebookTablesCount}}</td>
+                        <td>{{FacebookTotalRows}}</td>
+                        <td>{{FacebookDuration}}s</td>
+                        <td>{{FacebookExitCode}}</td>
+                    </tr>
+
+                    <!-- Google -->
+                    <tr>
+                        <td>
+                            <span class="platform-icon">🔍</span>
+                            <strong>Google Ads</strong>
+                        </td>
+                        <td>
+                            <span class="status-badge {{GoogleStatus}}">{{GoogleStatus}}</span>
+                        </td>
+                        <td>{{GoogleTablesCount}}</td>
+                        <td>{{GoogleTotalRows}}</td>
+                        <td>{{GoogleDuration}}s</td>
+                        <td>{{GoogleExitCode}}</td>
+                    </tr>
+
+                    <!-- Microsoft -->
+                    <tr>
+                        <td>
+                            <span class="platform-icon">🔷</span>
+                            <strong>Microsoft Ads</strong>
+                        </td>
+                        <td>
+                            <span class="status-badge {{MicrosoftStatus}}">{{MicrosoftStatus}}</span>
+                        </td>
+                        <td>{{MicrosoftTablesCount}}</td>
+                        <td>{{MicrosoftTotalRows}}</td>
+                        <td>{{MicrosoftDuration}}s</td>
+                        <td>{{MicrosoftExitCode}}</td>
+                    </tr>
+
+                    <!-- LinkedIn -->
+                    <tr>
+                        <td>
+                            <span class="platform-icon">💼</span>
+                            <strong>LinkedIn Ads</strong>
+                        </td>
+                        <td>
+                            <span class="status-badge {{LinkedInStatus}}">{{LinkedInStatus}}</span>
+                        </td>
+                        <td>{{LinkedInTablesCount}}</td>
+                        <td>{{LinkedInTotalRows}}</td>
+                        <td>{{LinkedInDuration}}s</td>
+                        <td>{{LinkedInExitCode}}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p>Generated automatically by Azure Logic App • Social Media ETL Pipeline Monitor</p>
+            <p>For issues or questions, contact the Data Engineering team</p>
+        </div>
+    </div>
+</body>
+</html>

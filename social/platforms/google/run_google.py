@@ -29,7 +29,7 @@ Environment Variables:
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 from loguru import logger
 
@@ -251,15 +251,16 @@ def main() -> int:
 
         # Run all tables
         logger.info("Running pipeline for all tables...")
-        results = pipeline.run_all_tables(load_to_sink=(data_sink is not None))
+        results, errors = pipeline.run_all_tables(load_to_sink=(data_sink is not None))
         end_time = datetime.now()
 
-        # Summary
-        successful = sum(1 for df in results.values() if not df.empty)
+        # Analyze results based on error tracking, not empty DataFrames
+        tables_succeeded = {name: df for name, df in results.items() if name not in errors}
+        tables_failed = list(errors.keys())
         total = len(results)
 
         logger.info("=" * 80)
-        logger.info(f"Pipeline Execution Complete: {successful}/{total} tables successful")
+        logger.info(f"Pipeline Execution Complete: {len(tables_succeeded)}/{total} tables successful")
         logger.info("=" * 80)
 
         # Close pipeline
@@ -269,11 +270,13 @@ def main() -> int:
         metadata = {
             "manager_customer_id": manager_customer_id,
             "api_version": api_version,
-            "tables_successful": successful,
+            "tables_successful": len(tables_succeeded),
             "tables_total": total,
+            "tables_failed": len(tables_failed),
         }
 
-        if successful == total:
+        if not tables_failed:
+            # All tables succeeded (even if some returned 0 rows)
             logger.success("All tables processed successfully")
             summary_writer.write_success(
                 start_time=start_time,
@@ -283,35 +286,29 @@ def main() -> int:
                 metadata=metadata,
             )
             return 0
-        elif successful > 0:
-            logger.warning(f"Partial success: {successful}/{total} tables completed")
-            # Separate successful and failed tables
-            tables_succeeded = {k: v for k, v in results.items() if not v.empty}
-            tables_failed = [k for k, v in results.items() if v.empty]
-
+        elif not tables_succeeded:
+            # All tables failed with exceptions
+            logger.error("All tables failed")
+            summary_writer.write_failure(
+                start_time=start_time,
+                end_time=end_time,
+                error=f"All {len(tables_failed)} tables failed to process",
+                exit_code=3,
+            )
+            return 3
+        else:
+            # Partial success: some tables succeeded, some failed with exceptions
+            logger.warning(f"Partial success: {len(tables_succeeded)}/{total} tables completed")
             summary_writer.write_partial_success(
                 start_time=start_time,
                 end_time=end_time,
                 tables_succeeded=tables_succeeded,
                 tables_failed=tables_failed,
-                errors=[{"table": t, "message": "No data returned"} for t in tables_failed],
+                errors=[{"table": name, "message": errors[name]} for name in tables_failed],
                 exit_code=3,
                 metadata=metadata,
             )
-            return 3  # Partial failure
-        else:
-            logger.error("All tables failed")
-            tables_failed = list(results.keys())
-            summary_writer.write_partial_success(
-                start_time=start_time,
-                end_time=end_time,
-                tables_succeeded={},
-                tables_failed=tables_failed,
-                errors=[{"table": t, "message": "No data returned"} for t in tables_failed],
-                exit_code=3,
-                metadata=metadata,
-            )
-            return 3  # Complete failure
+            return 3
 
     except ConfigurationError as e:
         logger.error(f"Configuration error: {str(e)}")

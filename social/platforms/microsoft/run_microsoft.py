@@ -52,7 +52,7 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from loguru import logger
 
@@ -415,7 +415,7 @@ def run_pipeline(
         logger.info("Starting pipeline execution for all tables")
         start_time = datetime.now()
 
-        results = pipeline.run_all_tables(load_to_sink=(data_sink is not None))
+        results, errors = pipeline.run_all_tables(load_to_sink=(data_sink is not None))
 
         # Calculate duration
         duration = (datetime.now() - start_time).total_seconds()
@@ -427,16 +427,21 @@ def run_pipeline(
         )
 
         for table_name, df in results.items():
-            logger.info(f"  {table_name}: {len(df)} rows")
+            if table_name in errors:
+                logger.error(f"  {table_name}: FAILED - {errors[table_name]}")
+            else:
+                logger.info(f"  {table_name}: {len(df)} rows")
 
         return {
             "results": results,
+            "errors": errors,
             "start_time": start_time,
             "end_time": datetime.now(),
             "metadata": {
                 "customer_id": authenticator.customer_id,
                 "account_id": authenticator.account_id,
                 "tables_count": len(results),
+                "tables_failed": len(errors),
             }
         }
 
@@ -496,16 +501,48 @@ def main() -> int:
         logger.success("Microsoft Ads ETL Pipeline completed successfully")
         logger.info("=" * 60)
 
-        # Write execution summary
-        summary_writer.write_success(
-            start_time=pipeline_result["start_time"],
-            end_time=pipeline_result["end_time"],
-            tables_processed=pipeline_result["results"],
-            exit_code=0,
-            metadata=pipeline_result["metadata"],
-        )
+        # Analyze results to detect failed tables (based on exception tracking, not empty DataFrames)
+        results = pipeline_result["results"]
+        errors_dict = pipeline_result["errors"]
 
-        return 0
+        # Separate succeeded and failed tables based on errors dict
+        tables_succeeded = {name: df for name, df in results.items() if name not in errors_dict}
+        tables_failed = list(errors_dict.keys())
+
+        # Write appropriate execution summary based on results
+        if not tables_failed:
+            # All tables succeeded (even if some returned 0 rows)
+            summary_writer.write_success(
+                start_time=pipeline_result["start_time"],
+                end_time=pipeline_result["end_time"],
+                tables_processed=pipeline_result["results"],
+                exit_code=0,
+                metadata=pipeline_result["metadata"],
+            )
+            return 0
+        elif not tables_succeeded:
+            # All tables failed with exceptions
+            logger.error("All tables failed to process")
+            summary_writer.write_failure(
+                start_time=pipeline_result["start_time"],
+                end_time=pipeline_result["end_time"],
+                error=f"All {len(tables_failed)} tables failed to process",
+                exit_code=3,
+            )
+            return 3
+        else:
+            # Partial success: some tables succeeded, some failed with exceptions
+            logger.warning(f"Partial success: {len(tables_succeeded)}/{len(results)} tables succeeded")
+            summary_writer.write_partial_success(
+                start_time=pipeline_result["start_time"],
+                end_time=pipeline_result["end_time"],
+                tables_succeeded=tables_succeeded,
+                tables_failed=tables_failed,
+                errors=[{"table": name, "message": errors_dict[name]} for name in tables_failed],
+                exit_code=3,
+                metadata=pipeline_result["metadata"],
+            )
+            return 3
 
     except ConfigurationError as e:
         logger.error(f"Configuration error: {e}")

@@ -116,22 +116,31 @@ class FacebookPipeline:
             logger.error(f"Pipeline failed for {table_name}: {str(e)}")
             raise PipelineError(f"Pipeline failed for {table_name}: {str(e)}") from e
 
-    def run_all_tables(self) -> Dict[str, pd.DataFrame]:
-        """Run the pipeline for all configured tables."""
+    def run_all_tables(self) -> tuple[Dict[str, pd.DataFrame], Dict[str, str]]:
+        """Run the pipeline for all configured tables.
+
+        Returns:
+            Tuple of (results, errors) where:
+            - results: Dict mapping table_name to DataFrame (may be empty for success with no data)
+            - errors: Dict mapping table_name to error message (only for tables that raised exceptions)
+        """
         logger.info(f"Running pipeline for all {len(self.table_names)} tables")
         results = {}
+        errors = {}
 
         for table_name in self.table_names:
             try:
                 df = self.run(table_name, load_to_sink=True)
                 results[table_name] = df
             except Exception as e:
-                logger.error(f"Failed to process table {table_name}: {str(e)}")
+                error_msg = str(e)
+                logger.error(f"Failed to process table {table_name}: {error_msg}")
                 results[table_name] = pd.DataFrame()
+                errors[table_name] = error_msg
 
-        successful = sum(1 for df in results.values() if not df.empty)
+        successful = len([name for name in results if name not in errors])
         logger.info(f"Pipeline completed: {successful}/{len(self.table_names)} tables successful")
-        return results
+        return results, errors
 
     def _extract_table(
         self,

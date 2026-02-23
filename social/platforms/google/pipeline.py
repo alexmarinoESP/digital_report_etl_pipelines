@@ -190,7 +190,7 @@ class GooglePipeline:
         self,
         load_to_sink: bool = True,
         tables: Optional[List[str]] = None,
-    ) -> Dict[str, pd.DataFrame]:
+    ) -> tuple[Dict[str, pd.DataFrame], Dict[str, str]]:
         """
         Run the pipeline for all configured tables.
 
@@ -208,7 +208,9 @@ class GooglePipeline:
             tables: Optional list of specific tables to process (default: all)
 
         Returns:
-            Dictionary mapping table names to processed DataFrames
+            Tuple of (results, errors) where:
+            - results: Dict mapping table_name to DataFrame (may be empty for success with no data)
+            - errors: Dict mapping table_name to error message (only for tables that raised exceptions)
 
         Raises:
             PipelineError: If any critical table fails
@@ -230,7 +232,7 @@ class GooglePipeline:
         ]
 
         results = {}
-        failed_tables = []
+        errors = {}
 
         for table_name in processing_order:
             if table_name not in self.table_names:
@@ -252,24 +254,27 @@ class GooglePipeline:
                 logger.success(f"Table {table_name} completed successfully")
 
             except Exception as e:
-                logger.error(f"Table {table_name} failed: {e}")
-                failed_tables.append(table_name)
+                error_msg = str(e)
+                logger.error(f"Table {table_name} failed: {error_msg}")
+                results[table_name] = pd.DataFrame()
+                errors[table_name] = error_msg
                 # Continue with other tables (non-critical failure)
 
         # Calculate duration
         duration = (datetime.now() - start_time).total_seconds()
 
         # Summary
+        successful = len([name for name in results if name not in errors])
         logger.info(
             f"Pipeline batch complete: "
-            f"{len(results)} succeeded, {len(failed_tables)} failed, "
+            f"{successful} succeeded, {len(errors)} failed, "
             f"duration: {duration:.2f}s"
         )
 
-        if failed_tables:
-            logger.warning(f"Failed tables: {failed_tables}")
+        if errors:
+            logger.warning(f"Failed tables: {list(errors.keys())}")
 
-        return results
+        return results, errors
 
     def _extract_table(
         self,

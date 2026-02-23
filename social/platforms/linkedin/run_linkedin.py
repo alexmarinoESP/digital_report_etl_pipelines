@@ -325,7 +325,7 @@ def run_pipeline(
     config: Dict[str, Any],
     token_provider: TokenProvider,
     data_sink: Optional[DataSink],
-) -> bool:
+) -> Dict[str, Any]:
     """
     Run the complete LinkedIn Ads ETL pipeline.
 
@@ -335,7 +335,7 @@ def run_pipeline(
         data_sink: Data sink for loading data
 
     Returns:
-        True if all tables processed successfully
+        Dictionary with results and metadata
 
     Raises:
         PipelineError: If pipeline execution fails
@@ -354,10 +354,11 @@ def run_pipeline(
         logger.info("Starting pipeline execution for all tables")
         start_time = datetime.now()
 
-        results = pipeline.run_all_tables(load_to_sink=(data_sink is not None))
+        results, errors = pipeline.run_all_tables(load_to_sink=(data_sink is not None))
 
         # Calculate duration
         duration = (datetime.now() - start_time).total_seconds()
+        end_time = datetime.now()
 
         # Log summary
         logger.success(
@@ -366,12 +367,24 @@ def run_pipeline(
         )
 
         for table_name, df in results.items():
-            logger.info(f"  {table_name}: {len(df)} rows")
+            if table_name in errors:
+                logger.error(f"  {table_name}: FAILED - {errors[table_name]}")
+            else:
+                logger.info(f"  {table_name}: {len(df)} rows")
 
         # Close pipeline resources
         pipeline.close()
 
-        return True
+        return {
+            "results": results,
+            "errors": errors,
+            "start_time": start_time,
+            "end_time": end_time,
+            "metadata": {
+                "tables_count": len(results),
+                "tables_failed": len(errors),
+            }
+        }
 
     except Exception as e:
         logger.error(f"Pipeline execution failed: {e}")
@@ -393,6 +406,16 @@ def main() -> int:
     logger.info("LinkedIn Ads ETL Pipeline")
     logger.info("=" * 60)
 
+    # Initialize execution summary writer
+    from shared.monitoring import ExecutionSummaryWriter
+
+    summary_writer = ExecutionSummaryWriter(
+        platform="linkedin_ads",
+        storage_connection_string=os.getenv("SUMMARY_STORAGE_CONNECTION_STRING"),
+    )
+
+    pipeline_start = datetime.now()
+
     try:
         # Step 1: Load configuration
         logger.info("\n[1/4] Loading configuration...")
@@ -408,28 +431,94 @@ def main() -> int:
 
         # Step 4: Run pipeline
         logger.info("\n[4/4] Running pipeline...")
-        run_pipeline(config, token_provider, data_sink)
+        pipeline_result = run_pipeline(config, token_provider, data_sink)
 
         # Success
         logger.info("\n" + "=" * 60)
         logger.success("LinkedIn Ads ETL Pipeline completed successfully")
         logger.info("=" * 60)
-        return 0
+
+        # Analyze results to detect failed tables (based on exception tracking, not empty DataFrames)
+        results = pipeline_result["results"]
+        errors_dict = pipeline_result["errors"]
+
+        # Separate succeeded and failed tables based on errors dict
+        tables_succeeded = {name: df for name, df in results.items() if name not in errors_dict}
+        tables_failed = list(errors_dict.keys())
+
+        # Write appropriate execution summary based on results
+        if not tables_failed:
+            # All tables succeeded (even if some returned 0 rows)
+            summary_writer.write_success(
+                start_time=pipeline_result["start_time"],
+                end_time=pipeline_result["end_time"],
+                tables_processed=pipeline_result["results"],
+                exit_code=0,
+                metadata=pipeline_result["metadata"],
+            )
+            return 0
+        elif not tables_succeeded:
+            # All tables failed with exceptions
+            logger.error("All tables failed to process")
+            summary_writer.write_failure(
+                start_time=pipeline_result["start_time"],
+                end_time=pipeline_result["end_time"],
+                error=f"All {len(tables_failed)} tables failed to process",
+                exit_code=3,
+            )
+            return 3
+        else:
+            # Partial success: some tables succeeded, some failed with exceptions
+            logger.warning(f"Partial success: {len(tables_succeeded)}/{len(results)} tables succeeded")
+            summary_writer.write_partial_success(
+                start_time=pipeline_result["start_time"],
+                end_time=pipeline_result["end_time"],
+                tables_succeeded=tables_succeeded,
+                tables_failed=tables_failed,
+                errors=[{"table": name, "message": errors_dict[name]} for name in tables_failed],
+                exit_code=3,
+                metadata=pipeline_result["metadata"],
+            )
+            return 3
 
     except ConfigurationError as e:
         logger.error(f"Configuration error: {e}")
+        summary_writer.write_failure(
+            start_time=pipeline_start,
+            end_time=datetime.now(),
+            error=e,
+            exit_code=1,
+        )
         return 1
 
     except AuthenticationError as e:
         logger.error(f"Authentication error: {e}")
+        summary_writer.write_failure(
+            start_time=pipeline_start,
+            end_time=datetime.now(),
+            error=e,
+            exit_code=2,
+        )
         return 2
 
     except PipelineError as e:
         logger.error(f"Pipeline error: {e}")
+        summary_writer.write_failure(
+            start_time=pipeline_start,
+            end_time=pipeline_start,
+            error=e,
+            exit_code=3,
+        )
         return 3
 
     except Exception as e:
         logger.exception(f"Unexpected error: {e}")
+        summary_writer.write_failure(
+            start_time=pipeline_start,
+            end_time=datetime.now(),
+            error=e,
+            exit_code=4,
+        )
         return 4
 
 

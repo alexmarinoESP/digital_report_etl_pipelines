@@ -100,7 +100,7 @@ class LinkedInPostsPipeline:
         self,
         tables: Optional[List[str]] = None,
         max_posts_per_org: Optional[int] = None,
-    ) -> Dict[str, pd.DataFrame]:
+    ) -> tuple[Dict[str, pd.DataFrame], Dict[str, str]]:
         """Run the complete ETL pipeline for specified tables.
 
         Args:
@@ -108,13 +108,16 @@ class LinkedInPostsPipeline:
             max_posts_per_org: Maximum posts per organization (for testing)
 
         Returns:
-            Dictionary mapping table names to processed DataFrames
+            Tuple of (results, errors) where:
+            - results: Dict mapping table_name to DataFrame (may be empty for success with no data)
+            - errors: Dict mapping table_name to error message (only for tables that raised exceptions)
 
         Raises:
             PipelineError: If pipeline execution fails
         """
         tables_to_process = tables or self.table_names
         results = {}
+        errors = {}
 
         logger.info(f"Starting LinkedIn Posts pipeline for tables: {tables_to_process}")
 
@@ -131,14 +134,20 @@ class LinkedInPostsPipeline:
                     if self.data_sink:
                         self._load_table(table_name, df)
                 else:
+                    # No data but no error - store empty DataFrame
+                    results[table_name] = pd.DataFrame()
                     logger.warning(f"Table {table_name}: No data to process")
 
             except Exception as e:
-                logger.error(f"Failed to process table {table_name}: {e}")
-                raise PipelineError(f"Pipeline failed for {table_name}: {e}")
+                error_msg = str(e)
+                logger.error(f"Failed to process table {table_name}: {error_msg}")
+                results[table_name] = pd.DataFrame()
+                errors[table_name] = error_msg
+                # Continue with other tables instead of raising
 
-        logger.info(f"LinkedIn Posts pipeline completed. Processed {len(results)} tables.")
-        return results
+        successful = len([name for name in results if name not in errors])
+        logger.info(f"LinkedIn Posts pipeline completed: {successful}/{len(tables_to_process)} tables successful")
+        return results, errors
 
     def _process_table(
         self,
