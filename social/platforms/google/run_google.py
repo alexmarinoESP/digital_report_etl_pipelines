@@ -186,13 +186,24 @@ def main() -> int:
     Returns:
         Exit code (0 = success, non-zero = error)
     """
-    try:
-        # Setup logging
-        setup_logging()
-        logger.info("=" * 80)
-        logger.info("Google Ads ETL Pipeline Starting")
-        logger.info("=" * 80)
+    # Setup logging
+    setup_logging()
+    logger.info("=" * 80)
+    logger.info("Google Ads ETL Pipeline Starting")
+    logger.info("=" * 80)
 
+    # Initialize execution summary writer
+    from datetime import datetime
+    from shared.monitoring import ExecutionSummaryWriter
+
+    summary_writer = ExecutionSummaryWriter(
+        platform="google",
+        storage_connection_string=os.getenv("SUMMARY_STORAGE_CONNECTION_STRING"),
+    )
+
+    pipeline_start = datetime.now()
+
+    try:
         # Load configuration
         logger.info("Loading configuration...")
         config_path = get_config_path()
@@ -225,6 +236,8 @@ def main() -> int:
 
         # Initialize pipeline
         logger.info("Initializing Google Ads pipeline...")
+        start_time = datetime.now()
+
         pipeline = GooglePipeline(
             config=config,
             token_provider=token_provider,
@@ -239,6 +252,7 @@ def main() -> int:
         # Run all tables
         logger.info("Running pipeline for all tables...")
         results = pipeline.run_all_tables(load_to_sink=(data_sink is not None))
+        end_time = datetime.now()
 
         # Summary
         successful = sum(1 for df in results.values() if not df.empty)
@@ -251,30 +265,92 @@ def main() -> int:
         # Close pipeline
         pipeline.close()
 
+        # Write execution summary
+        metadata = {
+            "manager_customer_id": manager_customer_id,
+            "api_version": api_version,
+            "tables_successful": successful,
+            "tables_total": total,
+        }
+
         if successful == total:
             logger.success("All tables processed successfully")
+            summary_writer.write_success(
+                start_time=start_time,
+                end_time=end_time,
+                tables_processed=results,
+                exit_code=0,
+                metadata=metadata,
+            )
             return 0
         elif successful > 0:
             logger.warning(f"Partial success: {successful}/{total} tables completed")
+            # Separate successful and failed tables
+            tables_succeeded = {k: v for k, v in results.items() if not v.empty}
+            tables_failed = [k for k, v in results.items() if v.empty]
+
+            summary_writer.write_partial_success(
+                start_time=start_time,
+                end_time=end_time,
+                tables_succeeded=tables_succeeded,
+                tables_failed=tables_failed,
+                errors=[{"table": t, "message": "No data returned"} for t in tables_failed],
+                exit_code=3,
+                metadata=metadata,
+            )
             return 3  # Partial failure
         else:
             logger.error("All tables failed")
+            tables_failed = list(results.keys())
+            summary_writer.write_partial_success(
+                start_time=start_time,
+                end_time=end_time,
+                tables_succeeded={},
+                tables_failed=tables_failed,
+                errors=[{"table": t, "message": "No data returned"} for t in tables_failed],
+                exit_code=3,
+                metadata=metadata,
+            )
             return 3  # Complete failure
 
     except ConfigurationError as e:
         logger.error(f"Configuration error: {str(e)}")
+        summary_writer.write_failure(
+            start_time=pipeline_start,
+            end_time=datetime.now(),
+            error=e,
+            exit_code=1,
+        )
         return 1
 
     except AuthenticationError as e:
         logger.error(f"Authentication error: {str(e)}")
+        summary_writer.write_failure(
+            start_time=pipeline_start,
+            end_time=datetime.now(),
+            error=e,
+            exit_code=2,
+        )
         return 2
 
     except PipelineError as e:
         logger.error(f"Pipeline execution error: {str(e)}")
+        summary_writer.write_failure(
+            start_time=pipeline_start,
+            end_time=datetime.now(),
+            error=e,
+            exit_code=3,
+        )
         return 3
 
     except Exception as e:
         logger.exception(f"Unexpected error: {str(e)}")
+        summary_writer.write_failure(
+            start_time=pipeline_start,
+            end_time=datetime.now(),
+            error=e,
+            exit_code=4,
+        )
         return 4
 
 

@@ -386,7 +386,7 @@ def run_pipeline(
     config: Any,
     authenticator: MicrosoftAdsAuthenticator,
     data_sink: Optional[Any],
-) -> bool:
+) -> Dict[str, Any]:
     """
     Run the complete Microsoft Ads ETL pipeline.
 
@@ -396,7 +396,7 @@ def run_pipeline(
         data_sink: Data sink for loading data
 
     Returns:
-        True if all tables processed successfully
+        Dictionary with results and metadata
 
     Raises:
         PipelineError: If pipeline execution fails
@@ -429,7 +429,16 @@ def run_pipeline(
         for table_name, df in results.items():
             logger.info(f"  {table_name}: {len(df)} rows")
 
-        return True
+        return {
+            "results": results,
+            "start_time": start_time,
+            "end_time": datetime.now(),
+            "metadata": {
+                "customer_id": authenticator.customer_id,
+                "account_id": authenticator.account_id,
+                "tables_count": len(results),
+            }
+        }
 
     except Exception as e:
         logger.error(f"Pipeline execution failed: {e}")
@@ -451,6 +460,16 @@ def main() -> int:
     logger.info("Microsoft Ads ETL Pipeline")
     logger.info("=" * 60)
 
+    # Initialize execution summary writer
+    from shared.monitoring import ExecutionSummaryWriter
+
+    summary_writer = ExecutionSummaryWriter(
+        platform="microsoft",
+        storage_connection_string=os.getenv("SUMMARY_STORAGE_CONNECTION_STRING"),
+    )
+
+    pipeline_start = datetime.now()
+
     try:
         # Step 1: Load configuration
         logger.info("\n[1/5] Loading configuration...")
@@ -470,32 +489,72 @@ def main() -> int:
 
         # Step 5: Run pipeline
         logger.info("\n[5/5] Running pipeline...")
-        run_pipeline(config, authenticator, data_sink)
+        pipeline_result = run_pipeline(config, authenticator, data_sink)
 
         # Success
         logger.info("\n" + "=" * 60)
         logger.success("Microsoft Ads ETL Pipeline completed successfully")
         logger.info("=" * 60)
+
+        # Write execution summary
+        summary_writer.write_success(
+            start_time=pipeline_result["start_time"],
+            end_time=pipeline_result["end_time"],
+            tables_processed=pipeline_result["results"],
+            exit_code=0,
+            metadata=pipeline_result["metadata"],
+        )
+
         return 0
 
     except ConfigurationError as e:
         logger.error(f"Configuration error: {e}")
+        summary_writer.write_failure(
+            start_time=pipeline_start,
+            end_time=datetime.now(),
+            error=e,
+            exit_code=1,
+        )
         return 1
 
     except RuntimeError as e:
         if "authentication" in str(e).lower():
             logger.error(f"Authentication error: {e}")
+            summary_writer.write_failure(
+                start_time=pipeline_start,
+                end_time=datetime.now(),
+                error=e,
+                exit_code=2,
+            )
             return 2
         else:
             logger.error(f"Runtime error: {e}")
+            summary_writer.write_failure(
+                start_time=pipeline_start,
+                end_time=datetime.now(),
+                error=e,
+                exit_code=3,
+            )
             return 3
 
     except PipelineError as e:
         logger.error(f"Pipeline error: {e}")
+        summary_writer.write_failure(
+            start_time=pipeline_start,
+            end_time=datetime.now(),
+            error=e,
+            exit_code=3,
+        )
         return 3
 
     except Exception as e:
         logger.exception(f"Unexpected error: {e}")
+        summary_writer.write_failure(
+            start_time=pipeline_start,
+            end_time=datetime.now(),
+            error=e,
+            exit_code=4,
+        )
         return 4
 
 

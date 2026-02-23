@@ -783,7 +783,7 @@ class VerticaDataSink:
             # DEBUG: Verify data was written with load_date
             if 'load_date' in df.columns and 'creative_id' in df.columns:
                 first_id = df['creative_id'].iloc[0]
-                verify_query = f"SELECT creative_id, load_date, row_loaded_date FROM {self.schema}.{table_name} WHERE creative_id = {first_id} LIMIT 1"
+                verify_query = f"SELECT creative_id, load_date FROM {self.schema}.{table_name} WHERE creative_id = {first_id} LIMIT 1"
                 cursor.execute(verify_query)
                 result = cursor.fetchone()
                 logger.debug(f"VERIFY after COPY: {verify_query}")

@@ -361,7 +361,7 @@ def run_pipeline(
     token_provider: TokenProvider,
     ad_account_ids: List[str],
     data_sink: Optional[DataSink],
-) -> bool:
+) -> Dict[str, Any]:
     """
     Run the complete Facebook Ads ETL pipeline.
 
@@ -372,7 +372,7 @@ def run_pipeline(
         data_sink: Data sink for loading data
 
     Returns:
-        True if all tables processed successfully
+        Dictionary with results and metadata
 
     Raises:
         PipelineError: If pipeline execution fails
@@ -418,7 +418,15 @@ def run_pipeline(
         # Close pipeline resources
         pipeline.close()
 
-        return True
+        return {
+            "results": results,
+            "start_time": start_time,
+            "end_time": datetime.now(),
+            "metadata": {
+                "account_ids": ad_account_ids,
+                "tables_count": len(results),
+            }
+        }
 
     except Exception as e:
         logger.error(f"Pipeline execution failed: {e}")
@@ -440,6 +448,16 @@ def main() -> int:
     logger.info("Facebook Ads ETL Pipeline")
     logger.info("=" * 60)
 
+    # Initialize execution summary writer
+    from shared.monitoring import ExecutionSummaryWriter
+
+    summary_writer = ExecutionSummaryWriter(
+        platform="facebook",
+        storage_connection_string=os.getenv("SUMMARY_STORAGE_CONNECTION_STRING"),
+    )
+
+    pipeline_start = datetime.now()
+
     try:
         # Step 1: Load configuration
         logger.info("\n[1/5] Loading configuration...")
@@ -459,28 +477,62 @@ def main() -> int:
 
         # Step 5: Run pipeline
         logger.info("\n[5/5] Running pipeline...")
-        run_pipeline(config, token_provider, ad_account_ids, data_sink)
+        pipeline_result = run_pipeline(config, token_provider, ad_account_ids, data_sink)
 
         # Success
         logger.info("\n" + "=" * 60)
         logger.success("Facebook Ads ETL Pipeline completed successfully")
         logger.info("=" * 60)
+
+        # Write execution summary
+        summary_writer.write_success(
+            start_time=pipeline_result["start_time"],
+            end_time=pipeline_result["end_time"],
+            tables_processed=pipeline_result["results"],
+            exit_code=0,
+            metadata=pipeline_result["metadata"],
+        )
+
         return 0
 
     except ConfigurationError as e:
         logger.error(f"Configuration error: {e}")
+        summary_writer.write_failure(
+            start_time=pipeline_start,
+            end_time=datetime.now(),
+            error=e,
+            exit_code=1,
+        )
         return 1
 
     except AuthenticationError as e:
         logger.error(f"Authentication error: {e}")
+        summary_writer.write_failure(
+            start_time=pipeline_start,
+            end_time=datetime.now(),
+            error=e,
+            exit_code=2,
+        )
         return 2
 
     except PipelineError as e:
         logger.error(f"Pipeline error: {e}")
+        summary_writer.write_failure(
+            start_time=pipeline_start,
+            end_time=datetime.now(),
+            error=e,
+            exit_code=3,
+        )
         return 3
 
     except Exception as e:
         logger.exception(f"Unexpected error: {e}")
+        summary_writer.write_failure(
+            start_time=pipeline_start,
+            end_time=datetime.now(),
+            error=e,
+            exit_code=4,
+        )
         return 4
 
 
