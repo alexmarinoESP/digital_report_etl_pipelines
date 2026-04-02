@@ -796,7 +796,7 @@ class VerticaDataSink:
         # This is a GENERIC fallback for other platforms
         if date_col or exclude_date:
             # Priority order for composite keys (check both snake_case and PascalCase)
-            for id_col in ["creative_id", "creativeid", "ad_id", "adid", "adgroup_id", "adgroupid", "campaign_id", "campaignid"]:
+            for id_col in ["creative_id", "creativeid", "ad_id", "adid", "adgroup_id", "adgroupid", "campaign_id", "campaignid", "organization_id", "organizationid"]:
                 if id_col in cols_lower:
                     pk_candidates.append(cols_lower[id_col])
                     if date_col and not exclude_date:
