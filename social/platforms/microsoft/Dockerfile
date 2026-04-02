@@ -55,6 +55,9 @@ COPY --chown=appuser:appuser shared/ /app/shared/
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
+# Set default token file location (will be overridden by Azure volume mount)
+ENV TOKEN_FILE=/app/data/tokens.json
+
 # Switch to non-root user
 USER appuser
 
