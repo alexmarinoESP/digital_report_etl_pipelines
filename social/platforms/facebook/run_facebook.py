@@ -113,7 +113,7 @@ def load_configuration() -> Dict[str, Any]:
         logger.info("Loading configuration")
 
         # Determine config file path
-        config_file = Path(__file__).parent / "config_fb_ads.yml"
+        config_file = Path(__file__).parent / "config_facebook_ads.yml"
 
         if not config_file.exists():
             raise ConfigurationError(f"Configuration file not found: {config_file}")
