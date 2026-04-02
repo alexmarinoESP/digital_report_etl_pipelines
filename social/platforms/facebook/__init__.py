@@ -63,5 +63,5 @@ dispatcher = {
 
 # Load Facebook Ads configuration
 cfg_fb_ads = read_config(
-    os.path.join(os.path.dirname(__file__), "config_fb_ads.yml")
+    os.path.join(os.path.dirname(__file__), "config_facebook_ads.yml")
 )
