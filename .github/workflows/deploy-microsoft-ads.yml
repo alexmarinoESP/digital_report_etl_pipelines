@@ -1,0 +1,55 @@
+name: Deploy Microsoft Ads to Azure
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'social/platforms/microsoft/**'
+  workflow_dispatch:  # Permette trigger manuale
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Log in to Azure Container Registry
+        run: |
+          echo ${{ secrets.ACR_PASSWORD }} | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: social/platforms/microsoft/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.ACR_LOGIN_SERVER }}/social-microsoft:latest
+            ${{ secrets.ACR_LOGIN_SERVER }}/social-microsoft:${{ github.sha }}
+          cache-from: type=registry,ref=${{ secrets.ACR_LOGIN_SERVER }}/social-microsoft:buildcache
+          cache-to: type=registry,ref=${{ secrets.ACR_LOGIN_SERVER }}/social-microsoft:buildcache,mode=max
+
+      - name: Update Azure Container App Job
+        run: |
+          az containerapp job update \
+            --name caj-social-microsoft-prod-sdc \
+            --resource-group rg-digitalreport-etl-prod-sdc \
+            --image ${{ secrets.ACR_LOGIN_SERVER }}/social-microsoft:${{ github.sha }}
+
+      - name: Deployment Summary
+        run: |
+          echo "✅ Microsoft Ads deployment completed successfully!"
+          echo "📦 Image: ${{ secrets.ACR_LOGIN_SERVER }}/social-microsoft:${{ github.sha }}"
+          echo "🚀 Container Job: caj-social-microsoft-prod-sdc"
+          echo "📅 Deployed at: $(date)"

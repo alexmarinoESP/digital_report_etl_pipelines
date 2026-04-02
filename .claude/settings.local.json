@@ -36,7 +36,9 @@
       "Bash(ping -n 1 vertica13.esprinet.com)",
       "Bash(Select-String -Pattern \"(publisher|geographic|Removed|duplicate|rows|Written|Replaced)\")",
       "Bash(if exist \"sql\" dir sql)",
-      "Bash(if exist \"reportdigital-api\" dir reportdigital-api)"
+      "Bash(if exist \"reportdigital-api\" dir reportdigital-api)",
+      "Bash(Select-String -Pattern \"caj-social\")",
+      "Bash(mkdir -p .github/workflows)"
     ],
     "deny": [],
     "ask": []

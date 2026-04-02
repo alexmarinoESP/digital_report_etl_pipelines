@@ -1,0 +1,55 @@
+name: Deploy Google Ads to Azure
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'social/platforms/google/**'
+  workflow_dispatch:  # Permette trigger manuale
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Log in to Azure Container Registry
+        run: |
+          echo ${{ secrets.ACR_PASSWORD }} | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: social/platforms/google/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.ACR_LOGIN_SERVER }}/social-google:latest
+            ${{ secrets.ACR_LOGIN_SERVER }}/social-google:${{ github.sha }}
+          cache-from: type=registry,ref=${{ secrets.ACR_LOGIN_SERVER }}/social-google:buildcache
+          cache-to: type=registry,ref=${{ secrets.ACR_LOGIN_SERVER }}/social-google:buildcache,mode=max
+
+      - name: Update Azure Container App Job
+        run: |
+          az containerapp job update \
+            --name caj-social-google-prod-sdc \
+            --resource-group rg-digitalreport-etl-prod-sdc \
+            --image ${{ secrets.ACR_LOGIN_SERVER }}/social-google:${{ github.sha }}
+
+      - name: Deployment Summary
+        run: |
+          echo "✅ Google Ads deployment completed successfully!"
+          echo "📦 Image: ${{ secrets.ACR_LOGIN_SERVER }}/social-google:${{ github.sha }}"
+          echo "🚀 Container Job: caj-social-google-prod-sdc"
+          echo "📅 Deployed at: $(date)"

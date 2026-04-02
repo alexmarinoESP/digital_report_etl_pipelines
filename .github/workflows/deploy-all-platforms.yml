@@ -1,0 +1,67 @@
+name: Deploy All Platforms to Azure
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'shared/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+  workflow_dispatch:  # Permette trigger manuale
+
+jobs:
+  build-and-deploy-all:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform:
+          - name: google
+            job: caj-social-google-prod-sdc
+          - name: linkedin
+            job: caj-social-linkedin-prod-sdc
+          - name: facebook
+            job: caj-social-facebook-prod-sdc
+          - name: microsoft
+            job: caj-social-microsoft-prod-sdc
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Log in to Azure Container Registry
+        run: |
+          echo ${{ secrets.ACR_PASSWORD }} | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
+
+      - name: Build and push Docker image for ${{ matrix.platform.name }}
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: social/platforms/${{ matrix.platform.name }}/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.ACR_LOGIN_SERVER }}/social-${{ matrix.platform.name }}:latest
+            ${{ secrets.ACR_LOGIN_SERVER }}/social-${{ matrix.platform.name }}:${{ github.sha }}
+          cache-from: type=registry,ref=${{ secrets.ACR_LOGIN_SERVER }}/social-${{ matrix.platform.name }}:buildcache
+          cache-to: type=registry,ref=${{ secrets.ACR_LOGIN_SERVER }}/social-${{ matrix.platform.name }}:buildcache,mode=max
+
+      - name: Update Azure Container App Job for ${{ matrix.platform.name }}
+        run: |
+          az containerapp job update \
+            --name ${{ matrix.platform.job }} \
+            --resource-group rg-digitalreport-etl-prod-sdc \
+            --image ${{ secrets.ACR_LOGIN_SERVER }}/social-${{ matrix.platform.name }}:${{ github.sha }}
+
+      - name: Deployment Summary for ${{ matrix.platform.name }}
+        run: |
+          echo "✅ ${{ matrix.platform.name }} Ads deployment completed!"
+          echo "📦 Image: ${{ secrets.ACR_LOGIN_SERVER }}/social-${{ matrix.platform.name }}:${{ github.sha }}"
+          echo "🚀 Container Job: ${{ matrix.platform.job }}"
