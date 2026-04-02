@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - 'shared/**'
+      - 'social/infrastructure/**'
+      - 'social/core/**'
       - 'pyproject.toml'
       - 'uv.lock'
   workflow_dispatch:  # Permette trigger manuale
