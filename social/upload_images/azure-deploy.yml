@@ -1,0 +1,44 @@
+# Azure Container App deployment configuration
+# Usage: az containerapp create --yaml azure-deploy.yml
+
+properties:
+  environmentId: /subscriptions/{SUBSCRIPTION_ID}/resourceGroups/{RESOURCE_GROUP}/providers/Microsoft.App/managedEnvironments/{ENVIRONMENT_NAME}
+  configuration:
+    ingress:
+      external: true
+      targetPort: 80
+      transport: http
+      allowInsecure: false
+    secrets:
+      - name: azure-storage-connection-string
+        value: "{AZURE_STORAGE_CONNECTION_STRING}"
+      - name: sentry-dsn
+        value: "{SENTRY_DSN}"  # Optional
+    registries:
+      - server: {ACR_NAME}.azurecr.io
+        username: {ACR_USERNAME}
+        passwordSecretRef: acr-password
+  template:
+    containers:
+      - image: {ACR_NAME}.azurecr.io/upload-images:latest
+        name: upload-images
+        env:
+          - name: AZURE_STORAGE_CONNECTION_STRING
+            secretRef: azure-storage-connection-string
+          - name: SENTRY_DSN
+            secretRef: sentry-dsn
+          - name: ENVIRONMENT
+            value: "production"
+          - name: LOG_LEVEL
+            value: "INFO"
+        resources:
+          cpu: 0.5
+          memory: 1Gi
+    scale:
+      minReplicas: 1
+      maxReplicas: 5
+      rules:
+        - name: http-rule
+          http:
+            metadata:
+              concurrentRequests: "10"

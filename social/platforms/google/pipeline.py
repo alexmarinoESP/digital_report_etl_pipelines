@@ -122,7 +122,7 @@ class GooglePipeline:
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         load_to_sink: bool = True,
-    ) -> pd.DataFrame:
+    ) -> tuple[pd.DataFrame, Optional[Dict[str, int]]]:
         """
         Run the pipeline for a single table.
 
@@ -139,7 +139,7 @@ class GooglePipeline:
             load_to_sink: If True, load data to sink after processing
 
         Returns:
-            Processed DataFrame
+            Tuple of (DataFrame, LoadStats dict) where LoadStats is None if not loaded
 
         Raises:
             ConfigurationError: If table configuration not found
@@ -160,7 +160,15 @@ class GooglePipeline:
 
             if df.empty:
                 logger.warning(f"No data extracted for {table_name}")
-                return df
+                empty_stats = {
+                    "rows_from_api": 0,
+                    "rows_inserted": 0,
+                    "rows_updated": 0,
+                    "rows_skipped": 0,
+                    "rows_filtered": 0,
+                    "rows_written": 0,
+                }
+                return df, empty_stats
 
             logger.success(f"Extracted {len(df)} rows for {table_name}")
 
@@ -171,16 +179,20 @@ class GooglePipeline:
             logger.success(f"Processing complete: {len(processed_df)} rows, {len(processed_df.columns)} columns")
 
             # Load to sink if configured
+            stats = None
             if load_to_sink and self.data_sink is not None:
                 logger.info(f"Loading data to sink: {table_name}")
-                rows_loaded = self._load_to_sink(processed_df, table_name, table_config)
-                logger.success(f"Loaded {rows_loaded} rows to {table_name}")
+                stats = self._load_to_sink(processed_df, table_name, table_config)
+                logger.success(
+                    f"Loaded {stats['rows_written']} rows to {table_name} "
+                    f"({stats['rows_inserted']} new + {stats['rows_updated']} updated)"
+                )
 
             # Calculate duration
             duration = (datetime.now() - start_time).total_seconds()
             logger.info(f"Pipeline completed for {table_name} in {duration:.2f}s")
 
-            return processed_df
+            return processed_df, stats
 
         except Exception as e:
             logger.error(f"Pipeline failed for table {table_name}: {e}")
@@ -190,7 +202,7 @@ class GooglePipeline:
         self,
         load_to_sink: bool = True,
         tables: Optional[List[str]] = None,
-    ) -> tuple[Dict[str, pd.DataFrame], Dict[str, str]]:
+    ) -> tuple[Dict[str, Dict[str, int]], Dict[str, str]]:
         """
         Run the pipeline for all configured tables.
 
@@ -208,8 +220,8 @@ class GooglePipeline:
             tables: Optional list of specific tables to process (default: all)
 
         Returns:
-            Tuple of (results, errors) where:
-            - results: Dict mapping table_name to DataFrame (may be empty for success with no data)
+            Tuple of (results_stats, errors) where:
+            - results_stats: Dict mapping table_name to LoadStats dict
             - errors: Dict mapping table_name to error message (only for tables that raised exceptions)
 
         Raises:
@@ -231,7 +243,7 @@ class GooglePipeline:
             "google_ads_cost_by_device",
         ]
 
-        results = {}
+        results_stats = {}
         errors = {}
 
         for table_name in processing_order:
@@ -246,17 +258,16 @@ class GooglePipeline:
 
             try:
                 logger.info(f"Processing table: {table_name}")
-                df = self.run(
+                df, stats = self.run(
                     table_name=table_name,
                     load_to_sink=load_to_sink,
                 )
-                results[table_name] = df
+                results_stats[table_name] = stats
                 logger.success(f"Table {table_name} completed successfully")
 
             except Exception as e:
                 error_msg = str(e)
                 logger.error(f"Table {table_name} failed: {error_msg}")
-                results[table_name] = pd.DataFrame()
                 errors[table_name] = error_msg
                 # Continue with other tables (non-critical failure)
 
@@ -264,17 +275,21 @@ class GooglePipeline:
         duration = (datetime.now() - start_time).total_seconds()
 
         # Summary
-        successful = len([name for name in results if name not in errors])
+        successful = len([name for name in results_stats if name not in errors])
+        total_written = sum(stats.get("rows_written", 0) for stats in results_stats.values())
+        total_from_api = sum(stats.get("rows_from_api", 0) for stats in results_stats.values())
+
         logger.info(
             f"Pipeline batch complete: "
             f"{successful} succeeded, {len(errors)} failed, "
+            f"{total_written} rows written from {total_from_api} API rows, "
             f"duration: {duration:.2f}s"
         )
 
         if errors:
             logger.warning(f"Failed tables: {list(errors.keys())}")
 
-        return results, errors
+        return results_stats, errors
 
     def _extract_table(
         self,
@@ -440,7 +455,7 @@ class GooglePipeline:
         df: pd.DataFrame,
         table_name: str,
         table_config: Dict[str, Any],
-    ) -> int:
+    ) -> Dict[str, int]:
         """
         Load DataFrame to data sink.
 
@@ -450,7 +465,7 @@ class GooglePipeline:
             table_config: Table configuration
 
         Returns:
-            Number of rows loaded
+            LoadStats dict with rows_from_api, rows_inserted, rows_updated, etc.
 
         Raises:
             PipelineError: If data sink not configured or load fails
@@ -509,7 +524,7 @@ class GooglePipeline:
                 load_mode = "append"
                 logger.debug(f"Using append mode for {table_name} (no PK specified)")
 
-            # Check if sink has write_dataframe method (Vertica style)
+            # Check if sink has write_dataframe method (Vertica style - legacy)
             if hasattr(self.data_sink, "write_dataframe"):
                 rows_loaded = self.data_sink.write_dataframe(
                     df=df,
@@ -517,19 +532,28 @@ class GooglePipeline:
                     schema_name="GoogleAnalytics",
                     if_exists=load_mode,
                 )
+                # Legacy sink returns int, convert to LoadStats dict
+                return {
+                    "rows_from_api": len(df),
+                    "rows_inserted": rows_loaded,
+                    "rows_updated": 0,
+                    "rows_skipped": 0,
+                    "rows_filtered": 0,
+                    "rows_written": rows_loaded,
+                }
             # Check if sink has load method (Protocol style - preferred)
             elif hasattr(self.data_sink, "load"):
-                rows_loaded = self.data_sink.load(
+                stats = self.data_sink.load(
                     df=df,
                     table_name=table_name,
                     mode=load_mode,
                     dedupe_columns=pk_columns,
                     increment_columns=increment_columns,
                 )
+                # LoadStats object, convert to dict
+                return stats.to_dict()
             else:
                 raise PipelineError("Data sink does not have a compatible load method")
-
-            return rows_loaded
 
         except Exception as e:
             logger.error(f"Failed to load data to sink: {e}")

@@ -186,10 +186,47 @@ class MicrosoftAdsClient:
                 "AverageCpm",
                 "Ctr",
             ]
+        elif report_name == "PublisherUsage":
+            default_columns = [
+                "AccountId",
+                "AccountName",
+                "CampaignId",
+                "CampaignName",
+                "AdGroupId",
+                "AdGroupName",
+                "PublisherUrl",
+                "AdDistribution",
+                "Impressions",
+                "Clicks",
+                "Ctr",
+                "Spend",
+                "AverageCpc",
+                "Conversions",
+                "ConversionRate",
+            ]
+        elif report_name == "Geographic":
+            default_columns = [
+                "AccountId",
+                "AccountName",
+                "CampaignId",
+                "CampaignName",
+                "AdGroupId",
+                "AdGroupName",
+                "Country",
+                "State",
+                "City",
+                "MetroArea",
+                "Impressions",
+                "Clicks",
+                "Ctr",
+                "Spend",
+                "AverageCpc",
+                "Conversions",
+            ]
         else:
             logger.error(f"Unsupported report name: {report_name}")
             raise ValueError(
-                f"Unsupported report name: {report_name}. Supported names are 'Ad' and 'Campaign'."
+                f"Unsupported report name: {report_name}. Supported names are 'Ad', 'Campaign', 'PublisherUsage', and 'Geographic'."
             )
 
         # Use provided columns or defaults

@@ -251,16 +251,16 @@ def main() -> int:
 
         # Run all tables
         logger.info("Running pipeline for all tables...")
-        results, errors = pipeline.run_all_tables(load_to_sink=(data_sink is not None))
+        results_stats, errors = pipeline.run_all_tables(load_to_sink=(data_sink is not None))
         end_time = datetime.now()
 
-        # Analyze results based on error tracking, not empty DataFrames
-        tables_succeeded = {name: df for name, df in results.items() if name not in errors}
+        # Analyze results based on error tracking
+        tables_succeeded_stats = {name: stats for name, stats in results_stats.items() if name not in errors}
         tables_failed = list(errors.keys())
-        total = len(results)
+        total = len(results_stats)
 
         logger.info("=" * 80)
-        logger.info(f"Pipeline Execution Complete: {len(tables_succeeded)}/{total} tables successful")
+        logger.info(f"Pipeline Execution Complete: {len(tables_succeeded_stats)}/{total} tables successful")
         logger.info("=" * 80)
 
         # Close pipeline
@@ -270,23 +270,23 @@ def main() -> int:
         metadata = {
             "manager_customer_id": manager_customer_id,
             "api_version": api_version,
-            "tables_successful": len(tables_succeeded),
+            "tables_successful": len(tables_succeeded_stats),
             "tables_total": total,
             "tables_failed": len(tables_failed),
         }
 
         if not tables_failed:
-            # All tables succeeded (even if some returned 0 rows)
+            # All tables succeeded
             logger.success("All tables processed successfully")
             summary_writer.write_success(
                 start_time=start_time,
                 end_time=end_time,
-                tables_processed=results,
+                tables_stats=results_stats,
                 exit_code=0,
                 metadata=metadata,
             )
             return 0
-        elif not tables_succeeded:
+        elif not tables_succeeded_stats:
             # All tables failed with exceptions
             logger.error("All tables failed")
             summary_writer.write_failure(
@@ -298,11 +298,11 @@ def main() -> int:
             return 3
         else:
             # Partial success: some tables succeeded, some failed with exceptions
-            logger.warning(f"Partial success: {len(tables_succeeded)}/{total} tables completed")
+            logger.warning(f"Partial success: {len(tables_succeeded_stats)}/{total} tables completed")
             summary_writer.write_partial_success(
                 start_time=start_time,
                 end_time=end_time,
-                tables_succeeded=tables_succeeded,
+                tables_succeeded_stats=tables_succeeded_stats,
                 tables_failed=tables_failed,
                 errors=[{"table": name, "message": errors[name]} for name in tables_failed],
                 exit_code=3,

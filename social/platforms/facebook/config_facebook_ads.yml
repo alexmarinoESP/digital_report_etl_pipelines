@@ -184,6 +184,62 @@ fb_ads_ad_set:
   upsert:
     pk_columns:
       - id
+
+
+# Placement breakdown by platform (publisher_platform)
+# Shows performance metrics split by Facebook, Instagram, Messenger, Audience Network
+fb_ads_insight_placement:
+  type: get_insights
+  fields: fields_ads_insight_placement
+  date_preset: last_90d  # 90 days to capture all active campaigns in last 3 months
+  breakdowns: ['publisher_platform']
+  processing:
+    aggregate_by_entity:
+      group_columns: ['campaign_id', 'publisher_platform']
+      metric_columns: ['impressions', 'spend', 'clicks', 'ctr', 'cpc', 'cpm']
+      agg_method: 'sum'
+    add_row_loaded_date:
+      params: None
+  query:
+    column_name:
+      - campaign_id
+      - publisher_platform
+  # UPSERT: Updates metrics for existing campaign+platform (last 90d), inserts new combinations
+  # Historical data beyond 90d is preserved unchanged
+  upsert:
+    pk_columns:
+      - campaign_id
+      - publisher_platform
+  scope: account
+
+
+# Demographics breakdown by age and gender
+# Shows performance metrics split by age ranges (18-24, 25-34, etc.) and gender (male/female/unknown)
+fb_ads_insight_demographics:
+  type: get_insights
+  fields: fields_ads_insight_demographics
+  date_preset: last_90d  # 90 days to capture all active campaigns in last 3 months
+  breakdowns: ['age', 'gender']
+  processing:
+    aggregate_by_entity:
+      group_columns: ['campaign_id', 'age', 'gender']
+      metric_columns: ['impressions', 'spend', 'clicks', 'ctr', 'cpc', 'cpm']
+      agg_method: 'sum'
+    add_row_loaded_date:
+      params: None
+  query:
+    column_name:
+      - campaign_id
+      - age
+      - gender
+  # UPSERT: Updates metrics for existing campaign+age+gender (last 90d), inserts new combinations
+  # Historical data beyond 90d is preserved unchanged
+  upsert:
+    pk_columns:
+      - campaign_id
+      - age
+      - gender
+  scope: account
 ##
 
 ####

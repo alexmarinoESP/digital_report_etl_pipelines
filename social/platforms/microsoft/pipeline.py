@@ -118,7 +118,7 @@ class MicrosoftAdsPipeline:
         account_ids: Optional[List[str]] = None,
         report_params: Optional[Dict[str, Any]] = None,
         load_to_sink: bool = True,
-    ) -> pd.DataFrame:
+    ) -> tuple[pd.DataFrame, Optional[Dict[str, int]]]:
         """
         Run the pipeline for a single table.
 
@@ -135,7 +135,7 @@ class MicrosoftAdsPipeline:
             load_to_sink: If True, load data to sink after processing
 
         Returns:
-            Processed DataFrame
+            Tuple of (DataFrame, LoadStats dict) where LoadStats is None if not loaded
 
         Raises:
             ConfigurationError: If table configuration not found
@@ -191,16 +191,20 @@ class MicrosoftAdsPipeline:
             logger.success(f"Processing complete: {len(processed_df)} rows, {len(processed_df.columns)} columns")
 
             # Load to sink if configured
+            stats = None
             if load_to_sink and self.data_sink is not None:
                 logger.info(f"Loading data to sink: {table_name}")
-                rows_loaded = self._load_to_sink(processed_df, table_name, table_config)
-                logger.success(f"Loaded {rows_loaded} rows to {table_name}")
+                stats = self._load_to_sink(processed_df, table_name, table_config)
+                logger.success(
+                    f"Loaded {stats['rows_written']} rows to {table_name} "
+                    f"({stats['rows_inserted']} new + {stats['rows_updated']} updated)"
+                )
 
             # Calculate duration
             duration = (datetime.now() - start_time).total_seconds()
             logger.info(f"Pipeline completed for {table_name} in {duration:.2f}s")
 
-            return processed_df
+            return processed_df, stats
 
         except Exception as e:
             logger.error(f"Pipeline failed for table {table_name}: {e}")
@@ -210,7 +214,7 @@ class MicrosoftAdsPipeline:
         self,
         account_ids: Optional[List[str]] = None,
         load_to_sink: bool = True,
-    ) -> tuple[Dict[str, pd.DataFrame], Dict[str, str]]:
+    ) -> tuple[Dict[str, Dict[str, int]], Dict[str, str]]:
         """
         Run the pipeline for all configured tables.
 
@@ -219,8 +223,8 @@ class MicrosoftAdsPipeline:
             load_to_sink: If True, load data to sink after processing
 
         Returns:
-            Tuple of (results, errors) where:
-            - results: Dict mapping table_name to DataFrame (may be empty for success with no data)
+            Tuple of (results_stats, errors) where:
+            - results_stats: Dict mapping table_name to LoadStats dict
             - errors: Dict mapping table_name to error message (only for tables that raised exceptions)
 
         Raises:
@@ -229,24 +233,23 @@ class MicrosoftAdsPipeline:
         logger.info(f"Starting pipeline for all tables: {list(self.config.tables.keys())}")
         start_time = datetime.now()
 
-        results = {}
+        results_stats = {}
         errors = {}
 
         for table_name in self.config.tables.keys():
             try:
                 logger.info(f"Processing table {table_name}")
-                df = self.run(
+                df, stats = self.run(
                     table_name=table_name,
                     account_ids=account_ids,
                     load_to_sink=load_to_sink,
                 )
-                results[table_name] = df
+                results_stats[table_name] = stats
                 logger.success(f"Table {table_name} completed successfully")
 
             except Exception as e:
                 error_msg = str(e)
                 logger.error(f"Table {table_name} failed: {error_msg}")
-                results[table_name] = pd.DataFrame()
                 errors[table_name] = error_msg
                 # Continue with other tables
 
@@ -254,17 +257,21 @@ class MicrosoftAdsPipeline:
         duration = (datetime.now() - start_time).total_seconds()
 
         # Summary
-        successful = len([name for name in results if name not in errors])
+        successful = len([name for name in results_stats if name not in errors])
+        total_written = sum(stats.get("rows_written", 0) for stats in results_stats.values())
+        total_from_api = sum(stats.get("rows_from_api", 0) for stats in results_stats.values())
+
         logger.info(
             f"Pipeline batch complete: "
             f"{successful} succeeded, {len(errors)} failed, "
+            f"{total_written} rows written from {total_from_api} API rows, "
             f"duration: {duration:.2f}s"
         )
 
         if errors:
             logger.warning(f"Failed tables: {list(errors.keys())}")
 
-        return results, errors
+        return results_stats, errors
 
     def _prepare_report_params(
         self,
@@ -349,6 +356,11 @@ class MicrosoftAdsPipeline:
             elif step_name == "drop_columns":
                 columns = step_params.get("columns", [])
                 processor.drop_columns(columns)
+            elif step_name == "drop_null_rows":
+                columns = step_params.get("columns", [])
+                processor.drop_null_rows(columns)
+            elif step_name == "normalize_column_names":
+                processor.normalize_column_names()
             elif step_name == "rename_columns":
                 mapping = step_params.get("mapping", {})
                 processor.rename_columns(mapping)
@@ -366,7 +378,7 @@ class MicrosoftAdsPipeline:
         df: pd.DataFrame,
         table_name: str,
         table_config: TableConfig,
-    ) -> int:
+    ) -> Dict[str, int]:
         """
         Load DataFrame to data sink.
 
@@ -376,7 +388,7 @@ class MicrosoftAdsPipeline:
             table_config: Table configuration
 
         Returns:
-            Number of rows loaded
+            LoadStats dict with rows_from_api, rows_inserted, rows_updated, etc.
 
         Raises:
             PipelineError: If data sink not configured or load fails
@@ -386,9 +398,9 @@ class MicrosoftAdsPipeline:
 
         try:
             # Determine load mode
-            load_mode = table_config.additional_params.get("load_mode", "append")
+            load_mode = table_config.additional_params.get("load_mode", "replace")
 
-            # Check if sink has write_dataframe method (Vertica style)
+            # Check if sink has write_dataframe method (Vertica style - legacy)
             if hasattr(self.data_sink, "write_dataframe"):
                 rows_loaded = self.data_sink.write_dataframe(
                     df=df,
@@ -396,17 +408,26 @@ class MicrosoftAdsPipeline:
                     schema_name=table_config.additional_params.get("schema", "GoogleAnalytics"),
                     if_exists=load_mode,
                 )
-            # Check if sink has load method (Protocol style)
+                # Legacy sink returns int, convert to LoadStats dict
+                return {
+                    "rows_from_api": len(df),
+                    "rows_inserted": rows_loaded,
+                    "rows_updated": 0,
+                    "rows_skipped": 0,
+                    "rows_filtered": 0,
+                    "rows_written": rows_loaded,
+                }
+            # Check if sink has load method (Protocol style - preferred)
             elif hasattr(self.data_sink, "load"):
-                rows_loaded = self.data_sink.load(
+                stats = self.data_sink.load(
                     df=df,
                     table_name=table_name,
                     mode=load_mode,
                 )
+                # LoadStats object, convert to dict
+                return stats.to_dict()
             else:
                 raise PipelineError("Data sink does not have a compatible load method")
-
-            return rows_loaded
 
         except Exception as e:
             logger.error(f"Failed to load data to sink: {e}")

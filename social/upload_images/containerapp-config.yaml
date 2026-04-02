@@ -1,0 +1,34 @@
+properties:
+  template:
+    containers:
+      - name: social-upload-images
+        image: crcentralsdc.azurecr.io/social-upload-images:latest
+        resources:
+          cpu: 0.5
+          memory: 1Gi
+        probes:
+          - type: Startup
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 10
+            successThreshold: 1
+            timeoutSeconds: 5
+          - type: Liveness
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 30
+            failureThreshold: 3
+            successThreshold: 1
+            timeoutSeconds: 5
+          - type: Readiness
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 10
+            failureThreshold: 3
+            successThreshold: 1
+            timeoutSeconds: 5

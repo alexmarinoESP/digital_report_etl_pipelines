@@ -178,3 +178,92 @@ microsoft_ads_data:
 #
 # For complete field lists, see:
 # https://docs.microsoft.com/en-us/advertising/reporting-service/adperformancereportrequest
+
+# Publisher Usage Performance Report (placement/site-level metrics)
+# Shows which publisher websites/domains display your ads
+# Daily granularity for complete historical tracking
+microsoft_ads_publisher_usage:
+  report_name: "PublisherUsage"
+  time_period: "LastThreeMonths"  # Last 90 days with daily granularity
+  aggregation: "Daily"             # Adds 'date' column for time-series data
+  header_identifier: "PublisherUrl"
+
+  fields:
+    - TimePeriod           # Date column (Microsoft API field name)
+    - AccountId
+    - AccountName
+    - CampaignId
+    - CampaignName
+    - AdGroupId
+    - AdGroupName
+    - PublisherUrl
+    - AdDistribution
+    - Impressions
+    - Clicks
+    - Ctr
+    - Spend
+    - AverageCpc
+    - Conversions
+    - ConversionRate
+
+  processing:
+    - normalize_column_names  # Convert PascalCase to snake_case FIRST (TimePeriod → time_period)
+    - convert_id_types
+    - drop_null_rows:
+        columns: ['publisher_url']  # Remove aggregated rows without publisher detail
+    - add_row_loaded_date
+    - add_ingestion_timestamp
+
+  schema: "GoogleAnalytics"
+  load_mode: "upsert"        # Update existing dates, insert new dates
+
+  query:
+    column_name:
+      - CampaignId
+      - PublisherUrl
+      - TimePeriod           # Now includes date in PRIMARY KEY
+
+# Geographic Performance Report (geographic location metrics)
+# Shows performance by user physical location
+# Daily granularity for complete historical tracking
+microsoft_ads_geographic:
+  report_name: "Geographic"
+  time_period: "LastThreeMonths"  # Last 90 days with daily granularity
+  aggregation: "Daily"             # Adds 'date' column for time-series data
+  header_identifier: "Country"
+
+  fields:
+    - TimePeriod           # Date column (Microsoft API field name)
+    - AccountId
+    - AccountName
+    - CampaignId
+    - CampaignName
+    - AdGroupId
+    - AdGroupName
+    - Country
+    - State
+    - City
+    - MetroArea
+    - Impressions
+    - Clicks
+    - Ctr
+    - Spend
+    - AverageCpc
+    - Conversions
+
+  processing:
+    - normalize_column_names  # Convert PascalCase to snake_case FIRST (TimePeriod → time_period)
+    - convert_id_types
+    - add_row_loaded_date
+    - add_ingestion_timestamp
+
+  schema: "GoogleAnalytics"
+  load_mode: "upsert"        # Update existing dates, insert new dates
+
+  query:
+    column_name:
+      - CampaignId
+      - Country
+      - State
+      - City
+      - TimePeriod           # Now includes date in PRIMARY KEY

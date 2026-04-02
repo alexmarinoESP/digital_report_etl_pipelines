@@ -169,6 +169,7 @@ class FacebookAdapter:
         account_id: str,
         date_range: Optional[str] = None,
         level: str = "ad",
+        breakdowns: Optional[List[str]] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
     ) -> List[Dict[str, Any]]:
@@ -178,6 +179,7 @@ class FacebookAdapter:
             account_id: Facebook Ad Account ID
             date_range: Date preset (e.g., "last_7d", "last_30d", "maximum")
             level: Aggregation level ("account", "campaign", "adset", "ad")
+            breakdowns: Optional list of breakdown dimensions (e.g., ["age", "gender"], ["publisher_platform"])
             start_date: Optional start date (for custom date ranges)
             end_date: Optional end date (for custom date ranges)
 
@@ -201,15 +203,19 @@ class FacebookAdapter:
 
                 logger.info(f"Using chunked date range: {start_date.date()} to {end_date.date()}")
 
+                base_params = {
+                    "level": level,
+                    "action_attribution_windows": ["7d_click", "1d_view"],
+                }
+                if breakdowns:
+                    base_params["breakdowns"] = breakdowns
+
                 insights = self.http_client.get_insights_chunked(
                     account_id=account_id,
                     fields=fields,
                     start_date=start_date,
                     end_date=end_date,
-                    params={
-                        "level": level,
-                        "action_attribution_windows": ["7d_click", "1d_view"],
-                    },
+                    params=base_params,
                 )
             else:
                 # Use date preset
@@ -219,6 +225,8 @@ class FacebookAdapter:
                     "level": level,
                     "action_attribution_windows": ["7d_click", "1d_view"],
                 }
+                if breakdowns:
+                    params["breakdowns"] = breakdowns
 
                 insights = self.http_client.get_insights(
                     account_id=account_id,
@@ -469,6 +477,7 @@ class FacebookAdapter:
         date_range: Optional[str] = None,
         date_preset: Optional[str] = None,
         level: str = "ad",
+        breakdowns: Optional[List[str]] = None,
         fields: Optional[List[str]] = None,
         **kwargs
     ) -> List[Dict[str, Any]]:
@@ -478,6 +487,7 @@ class FacebookAdapter:
             date_range: Date preset (e.g., "last_7d", "maximum")
             date_preset: Alternative param name for date_range (compatibility)
             level: Aggregation level
+            breakdowns: Optional list of breakdown dimensions (e.g., ["age", "gender"])
             fields: List of fields to retrieve - optional
             **kwargs: Additional parameters (ignored for compatibility)
 
@@ -490,14 +500,14 @@ class FacebookAdapter:
         # Support both date_range and date_preset parameter names
         effective_date = date_preset or date_range
 
-        logger.info(f"Fetching insights for {len(self.ad_account_ids)} accounts (date_preset={effective_date})")
+        logger.info(f"Fetching insights for {len(self.ad_account_ids)} accounts (date_preset={effective_date}, breakdowns={breakdowns})")
 
         all_insights = []
         failed_accounts = []
 
         for account_id in self.ad_account_ids:
             try:
-                insights = self.get_insights(account_id, effective_date, level)
+                insights = self.get_insights(account_id, effective_date, level, breakdowns=breakdowns)
                 all_insights.extend(insights)
             except APIError as e:
                 logger.error(f"Failed to fetch insights for account {account_id}: {e}")

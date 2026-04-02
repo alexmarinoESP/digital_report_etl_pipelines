@@ -8,7 +8,7 @@ data type management.
 import re
 import datetime
 from io import StringIO
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, NamedTuple
 import pandas as pd
 import numpy as np
 from loguru import logger
@@ -19,6 +19,39 @@ from social.core.protocols import DataSink
 from social.core.config import DatabaseConfig
 from social.core.exceptions import DatabaseError as SocialDatabaseError
 from social.core.constants import DATABASE_SCHEMA, DATABASE_TEST_SUFFIX, PIPE_DELIMITER, ESCAPE_CHARS
+
+
+class LoadStats(NamedTuple):
+    """Statistics from a database load operation.
+
+    Attributes:
+        rows_from_api: Total rows received from API (before any processing)
+        rows_inserted: New rows written to database
+        rows_updated: Existing rows updated in database
+        rows_skipped: Duplicate rows skipped (already in DB)
+        rows_filtered: Rows filtered out (e.g., NULL in PK, internal duplicates)
+    """
+    rows_from_api: int
+    rows_inserted: int
+    rows_updated: int
+    rows_skipped: int
+    rows_filtered: int
+
+    @property
+    def rows_written(self) -> int:
+        """Total rows written to database (inserted + updated)."""
+        return self.rows_inserted + self.rows_updated
+
+    def to_dict(self) -> Dict[str, int]:
+        """Convert to dictionary for serialization."""
+        return {
+            "rows_from_api": self.rows_from_api,
+            "rows_inserted": self.rows_inserted,
+            "rows_updated": self.rows_updated,
+            "rows_skipped": self.rows_skipped,
+            "rows_filtered": self.rows_filtered,
+            "rows_written": self.rows_written,
+        }
 
 
 class VerticaDataSink:
@@ -80,7 +113,7 @@ class VerticaDataSink:
         mode: str = "upsert",
         dedupe_columns: Optional[List[str]] = None,
         increment_columns: Optional[List[str]] = None,
-    ) -> int:
+    ) -> LoadStats:
         """Load DataFrame into Vertica table.
 
         Args:
@@ -95,14 +128,20 @@ class VerticaDataSink:
             increment_columns: Columns to increment (only for mode='increment')
 
         Returns:
-            Number of rows loaded/updated
+            LoadStats with detailed statistics about rows written to database
 
         Raises:
             DatabaseError: If load operation fails
         """
         if df.empty:
             logger.info(f"DataFrame empty, skipping load to {table_name}")
-            return 0
+            return LoadStats(
+                rows_from_api=0,
+                rows_inserted=0,
+                rows_updated=0,
+                rows_skipped=0,
+                rows_filtered=0,
+            )
 
         # Add _TEST suffix in test mode
         final_table_name = self._get_table_name(table_name)
@@ -141,18 +180,31 @@ class VerticaDataSink:
                 else:
                     logger.error("DEBUG AFTER - 'id' column MISSING!")
 
-            # STEP 1: Remove duplicates WITHIN the DataFrame itself
+            # Track statistics
+            rows_from_api = len(df)
+
+            # STEP 1: Auto-detect PK columns if not provided
+            if dedupe_columns is None:
+                dedupe_columns = self._detect_pk_columns(df)
+                if dedupe_columns:
+                    logger.warning(f"Auto-detected PK columns for {final_table_name}: {dedupe_columns}")
+                    logger.warning(f"DataFrame columns present: {list(df.columns)}")
+
+            # STEP 2: Remove duplicates WITHIN the DataFrame itself
             initial_rows = len(df)
-            # For UPSERT/INCREMENT, deduplicate on PK columns; otherwise all columns
-            if mode in ["upsert", "increment"] and dedupe_columns:
-                df = df.drop_duplicates(subset=dedupe_columns, keep='last')
+            # Always deduplicate on PK columns if available (to avoid false duplicates from timestamp columns)
+            if dedupe_columns:
+                keep_strategy = 'last' if mode in ["upsert", "increment"] else 'first'
+                df = df.drop_duplicates(subset=dedupe_columns, keep=keep_strategy)
                 duplicates_removed = initial_rows - len(df)
                 if duplicates_removed > 0:
                     logger.warning(
                         f"Removed {duplicates_removed} duplicate rows (by PK {dedupe_columns}) "
-                        f"from DataFrame before loading to {final_table_name}, kept last occurrence"
+                        f"from DataFrame before loading to {final_table_name}, kept {keep_strategy} occurrence"
                     )
             else:
+                # Fallback: if no PK detected, use all columns
+                logger.warning(f"No PK columns detected for {final_table_name}, deduplicating on all columns")
                 df = df.drop_duplicates(keep='first')
                 duplicates_removed = initial_rows - len(df)
                 if duplicates_removed > 0:
@@ -161,37 +213,79 @@ class VerticaDataSink:
                         f"before loading to {final_table_name}"
                     )
 
+            rows_filtered = duplicates_removed
+
             # Handle different load modes
             if mode == "replace":
                 # REPLACE: Truncate + Insert all
                 self._truncate_table(cursor, final_table_name)
-                rows_loaded = self._copy_to_db(cursor, final_table_name, df)
-                logger.info(f"✓ Replaced {rows_loaded} rows in {final_table_name}")
-                return rows_loaded
+                rows_inserted = self._copy_to_db(cursor, final_table_name, df)
+                logger.info(f"✓ Replaced {rows_inserted} rows in {final_table_name}")
+                return LoadStats(
+                    rows_from_api=rows_from_api,
+                    rows_inserted=rows_inserted,
+                    rows_updated=0,
+                    rows_skipped=0,
+                    rows_filtered=rows_filtered,
+                )
 
             elif mode == "append":
                 # APPEND: Insert only new rows (skip existing)
+                rows_before_dedupe = len(df)
                 df = self._deduplicate(cursor, final_table_name, df, dedupe_columns)
+                rows_skipped = rows_before_dedupe - len(df)
+
                 if df.empty:
                     logger.info(f"No new rows to append to {final_table_name}")
-                    return 0
-                rows_loaded = self._copy_to_db(cursor, final_table_name, df)
-                logger.info(f"✓ Appended {rows_loaded} new rows to {final_table_name}")
-                return rows_loaded
+                    return LoadStats(
+                        rows_from_api=rows_from_api,
+                        rows_inserted=0,
+                        rows_updated=0,
+                        rows_skipped=rows_skipped,
+                        rows_filtered=rows_filtered,
+                    )
+
+                rows_inserted = self._copy_to_db(cursor, final_table_name, df)
+                logger.info(f"✓ Appended {rows_inserted} new rows to {final_table_name}")
+                return LoadStats(
+                    rows_from_api=rows_from_api,
+                    rows_inserted=rows_inserted,
+                    rows_updated=0,
+                    rows_skipped=rows_skipped,
+                    rows_filtered=rows_filtered,
+                )
 
             elif mode == "upsert":
                 # UPSERT: Insert new + Update existing
-                rows_affected = self._upsert(cursor, final_table_name, df, dedupe_columns)
-                logger.info(f"✓ Upserted {rows_affected} rows to {final_table_name}")
-                return rows_affected
+                stats = self._upsert(cursor, final_table_name, df, dedupe_columns)
+                logger.info(
+                    f"✓ Upserted {stats['rows_inserted']} new + {stats['rows_updated']} updated "
+                    f"rows to {final_table_name}"
+                )
+                return LoadStats(
+                    rows_from_api=rows_from_api,
+                    rows_inserted=stats['rows_inserted'],
+                    rows_updated=stats['rows_updated'],
+                    rows_skipped=0,
+                    rows_filtered=rows_filtered,
+                )
 
             elif mode == "increment":
                 # INCREMENT: Insert new + Increment metrics for existing
                 if increment_columns is None:
                     raise ValueError("increment_columns required for mode='increment'")
-                rows_affected = self._increment(cursor, final_table_name, df, dedupe_columns, increment_columns)
-                logger.info(f"✓ Incremented {rows_affected} rows in {final_table_name}")
-                return rows_affected
+                stats = self._increment(cursor, final_table_name, df, dedupe_columns, increment_columns)
+                logger.info(
+                    f"✓ Incremented {stats['rows_inserted']} new + {stats['rows_updated']} updated "
+                    f"rows in {final_table_name}"
+                )
+                return LoadStats(
+                    rows_from_api=rows_from_api,
+                    rows_inserted=stats['rows_inserted'],
+                    rows_updated=stats['rows_updated'],
+                    rows_skipped=0,
+                    rows_filtered=rows_filtered,
+                )
 
             else:
                 raise ValueError(f"Invalid mode: {mode}. Must be 'append', 'replace', 'upsert', or 'increment'")
@@ -510,7 +604,7 @@ class VerticaDataSink:
         table_name: str,
         df: pd.DataFrame,
         pk_columns: Optional[List[str]] = None
-    ) -> int:
+    ) -> Dict[str, int]:
         """Perform UPSERT operation: INSERT new rows + UPDATE existing rows.
 
         This replicates the old MERGE strategy:
@@ -528,7 +622,7 @@ class VerticaDataSink:
             pk_columns: Primary key columns (None = auto-detect)
 
         Returns:
-            Total rows affected (inserted + updated)
+            Dict with 'rows_inserted' and 'rows_updated' keys
         """
         # Auto-detect PK columns if not provided
         if pk_columns is None:
@@ -537,7 +631,8 @@ class VerticaDataSink:
         if not pk_columns:
             logger.warning(f"No PK columns detected for {table_name}, falling back to append mode")
             df_new = self._deduplicate(cursor, table_name, df, None)
-            return self._copy_to_db(cursor, table_name, df_new)
+            rows_inserted = self._copy_to_db(cursor, table_name, df_new)
+            return {"rows_inserted": rows_inserted, "rows_updated": 0}
 
         logger.debug(f"UPSERT using PK columns: {pk_columns}")
 
@@ -573,7 +668,19 @@ class VerticaDataSink:
                 logger.warning(f"No columns to update for {table_name}, only PK columns found")
                 # If no update columns, just insert new rows
                 df_new = self._deduplicate(cursor, table_name, df, pk_columns)
-                return self._copy_to_db(cursor, table_name, df_new)
+                rows_inserted = self._copy_to_db(cursor, table_name, df_new)
+                return {"rows_inserted": rows_inserted, "rows_updated": 0}
+
+            # Query existing keys to calculate inserted vs updated
+            existing_keys = self._query_existing_keys(cursor, table_name, df, pk_columns)
+
+            # Count new vs existing rows
+            df_copy = df.copy()
+            df_copy['_merge_key'] = df_copy[pk_columns].apply(lambda row: tuple(row), axis=1)
+            df_copy['_is_new'] = ~df_copy['_merge_key'].isin(existing_keys)
+
+            rows_to_insert = df_copy['_is_new'].sum()
+            rows_to_update = (~df_copy['_is_new']).sum()
 
             # Build ON clause: TGT.id = SRC.id AND TGT.date = SRC.date
             on_conditions = " AND ".join([f"TGT.{col} = SRC.{col}" for col in pk_columns])
@@ -598,16 +705,12 @@ class VerticaDataSink:
             cursor.execute(merge_query)
             cursor.execute("COMMIT")
 
-            # Get count of rows in source (this is our "rows affected")
-            # Note: Vertica doesn't return affected rows from MERGE, so we approximate
-            rows_affected = rows_in_source
-
             logger.info(
                 f"MERGE completed: {source_table} → {table_name} "
-                f"(PK: {pk_columns}, {rows_affected} rows processed)"
+                f"(PK: {pk_columns}, {rows_to_insert} new + {rows_to_update} updated)"
             )
 
-            return rows_affected
+            return {"rows_inserted": rows_to_insert, "rows_updated": rows_to_update}
 
         except Exception as e:
             logger.error(f"UPSERT failed for {table_name}: {e}")
@@ -623,7 +726,7 @@ class VerticaDataSink:
     def _detect_pk_columns(self, df: pd.DataFrame, exclude_date: bool = False) -> List[str]:
         """Auto-detect Primary Key columns from DataFrame.
 
-        Detection logic:
+        Detection logic (case-insensitive):
         - If 'id' column exists → use 'id' alone
         - If 'date' column exists (and not excluded):
             - With 'creative_id' → use (creative_id, date)
@@ -642,57 +745,100 @@ class VerticaDataSink:
             exclude_date: If True, exclude 'date' from PK (for increment mode)
 
         Returns:
-            List of PK column names
+            List of PK column names (with original casing from DataFrame)
         """
         pk_candidates = []
 
+        # Create case-insensitive lookup: lowercase -> original column name
+        cols_lower = {col.lower(): col for col in df.columns}
+
         # Rule 1: Simple 'id' primary key (campaigns, accounts, creatives)
-        if "id" in df.columns:
-            pk_candidates.append("id")
+        if "id" in cols_lower:
+            pk_candidates.append(cols_lower["id"])
             logger.debug("Detected PK: 'id' (single column)")
             return pk_candidates
 
+        # IMPORTANT: Check Microsoft-specific rules BEFORE generic time-series rules
+        # to avoid false matches on adgroup_id + time_period
+
+        # Pre-compute date_col and campaign_col for reuse
+        date_col = cols_lower.get("date") or cols_lower.get("time_period") or cols_lower.get("timeperiod")
+        campaign_col = cols_lower.get("campaign_id") or cols_lower.get("campaignid")
+
+        # Rule 1a: Microsoft Ads Publisher Usage (placement) - CHECK FIRST
+        publisher_col = cols_lower.get("publisher_url") or cols_lower.get("publisherurl")
+        if campaign_col and publisher_col:
+            pk_candidates.extend([campaign_col, publisher_col])
+            # Add time_period if present (for daily aggregation)
+            if date_col:
+                pk_candidates.append(date_col)
+                logger.debug(f"Detected PK: ({campaign_col}, {publisher_col}, {date_col}) - Microsoft Ads placement (time-series)")
+            else:
+                logger.debug(f"Detected PK: ({campaign_col}, {publisher_col}) - Microsoft Ads placement (summary)")
+            return pk_candidates
+
+        # Rule 1b: Microsoft Ads Geographic - CHECK SECOND
+        country_col = cols_lower.get("country")
+        state_col = cols_lower.get("state")
+        city_col = cols_lower.get("city")
+
+        if campaign_col and country_col and state_col and city_col:
+            pk_candidates.extend([campaign_col, country_col, state_col, city_col])
+            # Add time_period if present (for daily aggregation)
+            if date_col:
+                pk_candidates.append(date_col)
+                logger.debug(f"Detected PK: ({campaign_col}, {country_col}, {state_col}, {city_col}, {date_col}) - Microsoft Ads geographic (time-series)")
+            else:
+                logger.debug(f"Detected PK: ({campaign_col}, {country_col}, {state_col}, {city_col}) - Microsoft Ads geographic (summary)")
+            return pk_candidates
+
         # Rule 2: Time-series data with date column (or aggregated if exclude_date)
-        if "date" in df.columns or exclude_date:
-            # Priority order for composite keys
-            for id_col in ["creative_id", "ad_id", "adgroup_id", "campaign_id"]:
-                if id_col in df.columns:
-                    pk_candidates.append(id_col)
-                    if "date" in df.columns and not exclude_date:
-                        pk_candidates.append("date")
-                        logger.debug(f"Detected PK: ({id_col}, date) - time-series data")
+        # This is a GENERIC fallback for other platforms
+        if date_col or exclude_date:
+            # Priority order for composite keys (check both snake_case and PascalCase)
+            for id_col in ["creative_id", "creativeid", "ad_id", "adid", "adgroup_id", "adgroupid", "campaign_id", "campaignid"]:
+                if id_col in cols_lower:
+                    pk_candidates.append(cols_lower[id_col])
+                    if date_col and not exclude_date:
+                        pk_candidates.append(date_col)
+                        logger.debug(f"Detected PK: ({cols_lower[id_col]}, {date_col}) - time-series data")
                     else:
-                        logger.debug(f"Detected PK: ({id_col}) - aggregated data (no date)")
+                        logger.debug(f"Detected PK: ({cols_lower[id_col]}) - aggregated data (no date)")
                     return pk_candidates
 
         # Rule 3: Audience targeting tables (Facebook)
-        if "audience_id" in df.columns and "adset_id" in df.columns:
-            pk_candidates.extend(["audience_id", "adset_id"])
+        if "audience_id" in cols_lower and "adset_id" in cols_lower:
+            pk_candidates.extend([cols_lower["audience_id"], cols_lower["adset_id"]])
             logger.debug("Detected PK: (audience_id, adset_id) - audience targeting")
             return pk_candidates
 
         # Rule 3b: Insight actions table (Facebook)
-        if "ad_id" in df.columns and "action_type" in df.columns:
-            pk_candidates.extend(["ad_id", "action_type"])
+        ad_col = cols_lower.get("ad_id") or cols_lower.get("adid")
+        if ad_col and "action_type" in cols_lower:
+            pk_candidates.extend([ad_col, cols_lower["action_type"]])
             logger.debug("Detected PK: (ad_id, action_type) - insight actions")
             return pk_candidates
 
         # Rule 4: Device-level aggregation (Google Ads cost_by_device)
-        if "ad_id" in df.columns and "device" in df.columns:
-            pk_candidates.extend(["ad_id", "device"])
+        if ad_col and "device" in cols_lower:
+            pk_candidates.extend([ad_col, cols_lower["device"]])
             logger.debug("Detected PK: (ad_id, device) - device aggregation")
             return pk_candidates
 
         # Rule 5: Composite keys without date
-        if "campaign_id" in df.columns and "adgroup_id" in df.columns and "ad_id" in df.columns:
-            pk_candidates.extend(["campaign_id", "adgroup_id", "ad_id"])
-            logger.debug("Detected PK: (campaign_id, adgroup_id, ad_id) - composite key")
+        adgroup_col = cols_lower.get("adgroup_id") or cols_lower.get("adgroupid")
+        ad_col = cols_lower.get("ad_id") or cols_lower.get("adid")
+
+        if campaign_col and adgroup_col and ad_col:
+            pk_candidates.extend([campaign_col, adgroup_col, ad_col])
+            logger.debug(f"Detected PK: ({campaign_col}, {adgroup_col}, {ad_col}) - composite key")
             return pk_candidates
 
-        # Fallback: use all columns except metadata
+        # Fallback: use all columns except metadata (case-insensitive check)
+        metadata_cols_lower = {"load_date", "last_updated_date", "row_loaded_date", "ingestion_timestamp"}
         pk_candidates = [
             col for col in df.columns
-            if col not in ["load_date", "last_updated_date"]
+            if col.lower() not in metadata_cols_lower
         ]
         logger.warning(f"No standard PK detected, using all {len(pk_candidates)} columns")
 
@@ -712,8 +858,16 @@ class VerticaDataSink:
         Raises:
             DatabaseError: If COPY fails
         """
-        # Drop duplicates within the DataFrame itself
-        df = df.drop_duplicates()
+        # Detect PK columns FIRST (before any deduplication)
+        pk_columns = self._detect_pk_columns(df)
+
+        # Drop duplicates ONLY on PK columns (not all columns, to avoid false duplicates from timestamps)
+        if pk_columns:
+            rows_before = len(df)
+            df = df.drop_duplicates(subset=pk_columns, keep='first')
+            rows_dropped = rows_before - len(df)
+            if rows_dropped > 0:
+                logger.debug(f"Dropped {rows_dropped} duplicate rows based on PK columns: {pk_columns}")
 
         # Replace all NaT values with None before converting to list
         # This is necessary because .values.tolist() converts NaT to string "NaT"
@@ -723,7 +877,6 @@ class VerticaDataSink:
         # CRITICAL: Filter NULL values in Primary Key columns
         # This replicates OLD project's behavior (connectdb.py line 301)
         # where rows with NULL in PK columns are dropped before COPY
-        pk_columns = self._detect_pk_columns(df)
         if pk_columns:
             rows_before = len(df)
             df = df.dropna(subset=pk_columns)
@@ -818,7 +971,7 @@ class VerticaDataSink:
         df: pd.DataFrame,
         pk_columns: Optional[List[str]] = None,
         increment_columns: List[str] = None,
-    ) -> int:
+    ) -> Dict[str, int]:
         """Perform INCREMENT operation: INSERT new rows + INCREMENT metrics for existing.
 
         This implements cumulative metric aggregation:
@@ -838,7 +991,7 @@ class VerticaDataSink:
             increment_columns: Metric columns to increment (e.g., impressions, clicks)
 
         Returns:
-            Total rows affected (inserted + updated)
+            Dict with 'rows_inserted' and 'rows_updated' keys
 
         Raises:
             SocialDatabaseError: If increment operation fails
@@ -850,7 +1003,8 @@ class VerticaDataSink:
         if not pk_columns:
             logger.warning(f"No PK columns detected for {table_name}, falling back to append mode")
             df_new = self._deduplicate(cursor, table_name, df, None)
-            return self._copy_to_db(cursor, table_name, df_new)
+            rows_inserted = self._copy_to_db(cursor, table_name, df_new)
+            return {"rows_inserted": rows_inserted, "rows_updated": 0}
 
         logger.debug(f"INCREMENT using PK columns: {pk_columns}, increment columns: {increment_columns}")
 
@@ -866,21 +1020,22 @@ class VerticaDataSink:
             new_rows = df_copy[df_copy['_is_new']].drop(columns=['_merge_key', '_is_new'])
             update_rows = df_copy[~df_copy['_is_new']].drop(columns=['_merge_key', '_is_new'])
 
-            rows_affected = 0
+            rows_inserted = 0
+            rows_updated = 0
 
             # Step 3: INSERT new rows (with all columns)
             if not new_rows.empty:
-                rows_affected += self._copy_to_db(cursor, table_name, new_rows)
-                logger.info(f"✓ Inserted {len(new_rows)} new rows")
+                rows_inserted = self._copy_to_db(cursor, table_name, new_rows)
+                logger.info(f"✓ Inserted {rows_inserted} new rows")
 
             # Step 4: INCREMENT metrics for existing rows
             if not update_rows.empty:
-                rows_affected += self._batch_increment_metrics(
+                rows_updated = self._batch_increment_metrics(
                     cursor, table_name, update_rows, pk_columns, increment_columns
                 )
-                logger.info(f"✓ Incremented {len(update_rows)} existing rows")
+                logger.info(f"✓ Incremented {rows_updated} existing rows")
 
-            return rows_affected
+            return {"rows_inserted": rows_inserted, "rows_updated": rows_updated}
 
         except Exception as e:
             logger.error(f"INCREMENT failed for {table_name}: {e}")

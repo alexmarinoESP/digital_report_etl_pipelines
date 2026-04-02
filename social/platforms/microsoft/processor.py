@@ -227,6 +227,66 @@ class MicrosoftAdsProcessor:
         logger.debug(f"Filtered rows: {rows_before} -> {rows_after} ({rows_before - rows_after} removed)")
         return self
 
+    def drop_null_rows(self, columns: List[str]) -> "MicrosoftAdsProcessor":
+        """
+        Drop rows where specified columns contain NULL/NaN values.
+
+        This is useful for removing aggregated rows from Microsoft Ads reports
+        that don't have granular detail (e.g., rows without PublisherUrl or City).
+
+        Args:
+            columns: List of column names to check for NULL values
+
+        Returns:
+            Self for method chaining
+        """
+        rows_before = len(self.df)
+
+        # Check which columns exist
+        existing_cols = [col for col in columns if col in self.df.columns]
+
+        if not existing_cols:
+            logger.warning(f"None of the specified columns exist: {columns}")
+            return self
+
+        # Drop rows where ANY of the specified columns is NULL
+        self.df = self.df.dropna(subset=existing_cols)
+        rows_after = len(self.df)
+        rows_dropped = rows_before - rows_after
+
+        logger.info(f"Dropped {rows_dropped} rows with NULL values in {existing_cols}")
+        return self
+
+    def normalize_column_names(self) -> "MicrosoftAdsProcessor":
+        """
+        Convert column names from PascalCase to snake_case to match database schema.
+
+        This is necessary because Microsoft Ads API returns columns in PascalCase
+        (e.g., CampaignId, PublisherUrl) but the database schema uses snake_case
+        (e.g., campaign_id, publisher_url).
+
+        Returns:
+            Self for method chaining
+        """
+        import re
+
+        def pascal_to_snake(name: str) -> str:
+            """Convert PascalCase to snake_case"""
+            # Insert underscore before uppercase letters (except first char)
+            s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+            # Insert underscore before uppercase letters preceded by lowercase
+            s2 = re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1)
+            return s2.lower()
+
+        # Create mapping from old names to new names
+        column_mapping = {col: pascal_to_snake(col) for col in self.df.columns}
+
+        # Rename columns
+        self.df = self.df.rename(columns=column_mapping)
+        logger.debug(f"Normalized column names: {list(self.df.columns)}")
+
+        return self
+
     def deduplicate(
         self,
         subset: Optional[List[str]] = None,

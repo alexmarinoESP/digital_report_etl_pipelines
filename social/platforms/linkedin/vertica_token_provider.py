@@ -58,6 +58,8 @@ class VerticaTokenProvider:
         ROW_LOADED_DATE IN (SELECT MAX(G.ROW_LOADED_DATE) FROM ESPDM.SOCIAL_ADS_POSTS_ACCESS_CODE G)
         """
 
+        cursor = None
+        conn = None
         try:
             conn = self._connection.connect()
             cursor = conn.cursor()
@@ -84,6 +86,8 @@ class VerticaTokenProvider:
         finally:
             if cursor:
                 cursor.close()
+            if conn:
+                conn.close()
 
     def get_access_token(self) -> str:
         """Get access token for API requests.

@@ -100,7 +100,7 @@ class LinkedInPostsPipeline:
         self,
         tables: Optional[List[str]] = None,
         max_posts_per_org: Optional[int] = None,
-    ) -> tuple[Dict[str, pd.DataFrame], Dict[str, str]]:
+    ) -> tuple[Dict[str, Dict[str, int]], Dict[str, str]]:
         """Run the complete ETL pipeline for specified tables.
 
         Args:
@@ -108,15 +108,15 @@ class LinkedInPostsPipeline:
             max_posts_per_org: Maximum posts per organization (for testing)
 
         Returns:
-            Tuple of (results, errors) where:
-            - results: Dict mapping table_name to DataFrame (may be empty for success with no data)
+            Tuple of (results_stats, errors) where:
+            - results_stats: Dict mapping table_name to LoadStats dict
             - errors: Dict mapping table_name to error message (only for tables that raised exceptions)
 
         Raises:
             PipelineError: If pipeline execution fails
         """
         tables_to_process = tables or self.table_names
-        results = {}
+        results_stats = {}
         errors = {}
 
         logger.info(f"Starting LinkedIn Posts pipeline for tables: {tables_to_process}")
@@ -127,27 +127,49 @@ class LinkedInPostsPipeline:
                 df = self._process_table(table_name, max_posts_per_org)
 
                 if df is not None and not df.empty:
-                    results[table_name] = df
                     logger.info(f"Table {table_name}: {len(df)} rows processed")
 
                     # Load to database if data_sink is configured
                     if self.data_sink:
-                        self._load_table(table_name, df)
+                        stats = self._load_table(table_name, df)
+                        results_stats[table_name] = stats
+                    else:
+                        # No sink - return basic stats
+                        results_stats[table_name] = {
+                            "rows_from_api": len(df),
+                            "rows_inserted": 0,
+                            "rows_updated": 0,
+                            "rows_skipped": 0,
+                            "rows_filtered": 0,
+                            "rows_written": 0,
+                        }
                 else:
-                    # No data but no error - store empty DataFrame
-                    results[table_name] = pd.DataFrame()
+                    # No data but no error - empty stats
+                    results_stats[table_name] = {
+                        "rows_from_api": 0,
+                        "rows_inserted": 0,
+                        "rows_updated": 0,
+                        "rows_skipped": 0,
+                        "rows_filtered": 0,
+                        "rows_written": 0,
+                    }
                     logger.warning(f"Table {table_name}: No data to process")
 
             except Exception as e:
                 error_msg = str(e)
                 logger.error(f"Failed to process table {table_name}: {error_msg}")
-                results[table_name] = pd.DataFrame()
                 errors[table_name] = error_msg
                 # Continue with other tables instead of raising
 
-        successful = len([name for name in results if name not in errors])
-        logger.info(f"LinkedIn Posts pipeline completed: {successful}/{len(tables_to_process)} tables successful")
-        return results, errors
+        successful = len([name for name in results_stats if name not in errors])
+        total_written = sum(stats.get("rows_written", 0) for stats in results_stats.values())
+        total_from_api = sum(stats.get("rows_from_api", 0) for stats in results_stats.values())
+
+        logger.info(
+            f"LinkedIn Posts pipeline completed: {successful}/{len(tables_to_process)} tables successful, "
+            f"{total_written} rows written from {total_from_api} API rows"
+        )
+        return results_stats, errors
 
     def _process_table(
         self,
@@ -371,7 +393,7 @@ class LinkedInPostsPipeline:
             return pd.concat(all_data, ignore_index=True)
         return pd.DataFrame()
 
-    def _load_table(self, table_name: str, df: pd.DataFrame):
+    def _load_table(self, table_name: str, df: pd.DataFrame) -> Dict[str, int]:
         """Load processed data to database.
 
         Determines load mode from table configuration:
@@ -381,6 +403,9 @@ class LinkedInPostsPipeline:
         Args:
             table_name: Target table name
             df: DataFrame to load
+
+        Returns:
+            LoadStats dict with rows_from_api, rows_inserted, rows_updated, etc.
         """
         table_config = self.config.get(table_name, {})
 
@@ -400,7 +425,7 @@ class LinkedInPostsPipeline:
 
         logger.info(f"Loading {table_name} with mode={load_mode}, pk={pk_columns}")
 
-        rows_loaded = self.data_sink.load(
+        stats = self.data_sink.load(
             df=df,
             table_name=table_name,
             mode=load_mode,
@@ -408,7 +433,12 @@ class LinkedInPostsPipeline:
             increment_columns=increment_columns,
         )
 
-        logger.info(f"Loaded {rows_loaded} rows to {table_name}")
+        logger.info(
+            f"Loaded {stats.rows_written} rows to {table_name} "
+            f"({stats.rows_inserted} new + {stats.rows_updated} updated)"
+        )
+
+        return stats.to_dict()
 
     def close(self):
         """Clean up resources."""

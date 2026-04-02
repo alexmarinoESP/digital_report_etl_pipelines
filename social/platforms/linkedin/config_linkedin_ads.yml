@@ -147,6 +147,78 @@ linkedin_ads_audience:
     modify_urn_li_sponsoredAccount:
       params: None
     add_row_loaded_date: None  # None or params: None in old code
+
+# Demographics tables - Per Campaign (like Google placements)
+# Strategy: Query demographics for each active campaign
+# Load mode: UPSERT (update existing + insert new)
+# Primary key: (campaign_id, company_id/title_id/seniority_code)
+# Retention: 90 days lookback, cleanup > 2 years
+
+linkedin_ads_demographics_company:
+  request: get_demographics_insights
+  type: DEMOGRAPHICS
+  pivot: MEMBER_COMPANY
+  time_granularity: ALL  # Aggregate all period (per campaign)
+  lookback_days: 180  # Last 3 months
+  query_per_campaign: true  # IMPORTANT: Query each campaign separately
+  processing:
+    rename_columns:
+      mapping:
+        costInLocalCurrency: cost_in_local_currency
+        landingPageClicks: landing_page_clicks
+        externalWebsiteConversions: conversions
+    extract_pivot_value:
+      pivot_field: pivotValues
+      urn_type: organization
+      id_column: company_id
+    lookup_organization_names:
+      id_column: company_id
+      name_column: company_name
+    add_campaign_info:
+      # Add campaign_id and campaign_name from context
+      params: None
+    replace_nan_with_zero:
+      columns: ['cost_in_local_currency']
+    add_row_loaded_date: None
+  upsert:
+    pk_columns:
+      - campaign_id
+      - company_id
+    # UPSERT: If (campaign_id, company_id) exists, UPDATE metrics
+    #         If not exists, INSERT new row
+    # Note: No date dimension in PK (snapshot mode like Google placements)
+
+linkedin_ads_demographics_job_title:
+  request: get_demographics_insights
+  type: DEMOGRAPHICS
+  pivot: MEMBER_JOB_TITLE
+  time_granularity: ALL
+  lookback_days: 180
+  query_per_campaign: true
+  processing:
+    rename_columns:
+      mapping:
+        costInLocalCurrency: cost_in_local_currency
+        landingPageClicks: landing_page_clicks
+        externalWebsiteConversions: conversions
+    extract_pivot_value:
+      pivot_field: pivotValues
+      urn_type: title
+      id_column: job_title_id
+    lookup_title_names:
+      id_column: job_title_id
+      name_column: job_title_name
+    add_campaign_info:
+      params: None
+    replace_nan_with_zero:
+      columns: ['cost_in_local_currency']
+    add_row_loaded_date: None
+  upsert:
+    pk_columns:
+      - campaign_id
+      - job_title_id
+
+# linkedin_ads_demographics_seniority: REMOVED - not needed
 #
 #
 

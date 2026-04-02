@@ -30,3 +30,6 @@ class LinkedinEndPoint(Enum):
     # Audience endpoints
     AUDIENCES = "{}/adSegments"
     AUDIENCE = "{}/adSegments"  # Alias for compatibility
+
+    # Demographics endpoints
+    DEMOGRAPHICS = "{}/adAnalytics"  # Uses same endpoint as ANALYTICS but with pivot parameter

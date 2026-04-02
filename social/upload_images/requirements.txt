@@ -1,0 +1,16 @@
+# Core FastAPI dependencies
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+gunicorn>=21.2.0
+python-multipart>=0.0.6
+
+# Azure dependencies
+azure-storage-blob>=12.19.0
+
+# Logging and monitoring
+loguru>=0.7.0
+sentry-sdk[fastapi]>=1.38.0
+
+# Utilities
+pydantic>=2.5.0
+python-dotenv>=1.0.0

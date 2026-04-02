@@ -99,7 +99,7 @@ def run_pipeline(
 
     # Run pipeline
     start_time = datetime.now()
-    results, errors = pipeline.run(
+    results_stats, errors = pipeline.run(
         tables=tables,
         max_posts_per_org=max_posts_per_org,
     )
@@ -108,11 +108,15 @@ def run_pipeline(
     # Log results
     logger.info("=" * 60)
     logger.info("Pipeline Results:")
-    for table_name, df in results.items():
+    for table_name, stats in results_stats.items():
         if table_name in errors:
             logger.error(f"  {table_name}: FAILED - {errors[table_name]}")
         else:
-            logger.info(f"  {table_name}: {len(df)} rows")
+            logger.info(
+                f"  {table_name}: {stats['rows_written']} rows written "
+                f"({stats['rows_inserted']} new + {stats['rows_updated']} updated) "
+                f"from {stats['rows_from_api']} API rows"
+            )
     logger.info("=" * 60)
     logger.info("Pipeline completed successfully!")
 
@@ -120,12 +124,12 @@ def run_pipeline(
     pipeline.close()
 
     return {
-        "results": results,
+        "results_stats": results_stats,
         "errors": errors,
         "start_time": start_time,
         "end_time": end_time,
         "metadata": {
-            "tables_count": len(results),
+            "tables_count": len(results_stats),
             "tables_failed": len(errors),
             "test_mode": test_mode,
             "max_posts_per_org": max_posts_per_org,
@@ -192,26 +196,26 @@ def main() -> int:
             dry_run=args.dry_run,
         )
 
-        # Analyze results to detect failed tables (based on exception tracking, not empty DataFrames)
-        results = pipeline_result["results"]
+        # Analyze results to detect failed tables (based on exception tracking)
         errors_dict = pipeline_result["errors"]
 
         # Separate succeeded and failed tables based on errors dict
-        tables_succeeded = {name: df for name, df in results.items() if name not in errors_dict}
+        results_stats = pipeline_result.get("results_stats", {})
+        tables_succeeded_stats = {name: stats for name, stats in results_stats.items() if name not in errors_dict}
         tables_failed = list(errors_dict.keys())
 
         # Write appropriate execution summary based on results
         if not tables_failed:
-            # All tables succeeded (even if some returned 0 rows)
+            # All tables succeeded
             summary_writer.write_success(
                 start_time=pipeline_result["start_time"],
                 end_time=pipeline_result["end_time"],
-                tables_processed=pipeline_result["results"],
+                tables_stats=results_stats,
                 exit_code=0,
                 metadata=pipeline_result["metadata"],
             )
             return 0
-        elif not tables_succeeded:
+        elif not tables_succeeded_stats:
             # All tables failed with exceptions
             logger.error("All tables failed to process")
             summary_writer.write_failure(
@@ -223,11 +227,11 @@ def main() -> int:
             return 3
         else:
             # Partial success: some tables succeeded, some failed with exceptions
-            logger.warning(f"Partial success: {len(tables_succeeded)}/{len(results)} tables succeeded")
+            logger.warning(f"Partial success: {len(tables_succeeded_stats)}/{len(results_stats)} tables succeeded")
             summary_writer.write_partial_success(
                 start_time=pipeline_result["start_time"],
                 end_time=pipeline_result["end_time"],
-                tables_succeeded=tables_succeeded,
+                tables_succeeded_stats=tables_succeeded_stats,
                 tables_failed=tables_failed,
                 errors=[{"table": name, "message": errors_dict[name]} for name in tables_failed],
                 exit_code=3,

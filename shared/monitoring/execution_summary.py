@@ -98,7 +98,7 @@ class ExecutionSummaryWriter:
         self,
         start_time: datetime,
         end_time: datetime,
-        tables_processed: Dict[str, pd.DataFrame],
+        tables_stats: Dict[str, Dict[str, int]],
         exit_code: int = 0,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
@@ -107,15 +107,27 @@ class ExecutionSummaryWriter:
         Args:
             start_time: Pipeline start timestamp
             end_time: Pipeline end timestamp
-            tables_processed: Dictionary of {table_name: DataFrame}
+            tables_stats: Dictionary of {table_name: LoadStats.to_dict()}
             exit_code: Exit code (default: 0 for success)
             metadata: Optional additional metadata to include
         """
-        # Calculate total rows across all tables
-        total_rows = sum(len(df) for df in tables_processed.values())
+        # Calculate totals across all tables
+        total_rows_from_api = sum(stats.get("rows_from_api", 0) for stats in tables_stats.values())
+        total_rows_written = sum(stats.get("rows_written", 0) for stats in tables_stats.values())
+        total_rows_inserted = sum(stats.get("rows_inserted", 0) for stats in tables_stats.values())
+        total_rows_updated = sum(stats.get("rows_updated", 0) for stats in tables_stats.values())
+        total_rows_skipped = sum(stats.get("rows_skipped", 0) for stats in tables_stats.values())
+        total_rows_filtered = sum(stats.get("rows_filtered", 0) for stats in tables_stats.values())
 
-        # Format table details
-        tables = self._format_tables(tables_processed, success=True)
+        # Format table details with stats
+        tables = [
+            {
+                "name": table_name,
+                "success": True,
+                **stats,  # Include all LoadStats fields
+            }
+            for table_name, stats in tables_stats.items()
+        ]
 
         # Build summary
         summary = {
@@ -127,7 +139,12 @@ class ExecutionSummaryWriter:
             "duration_seconds": (end_time - start_time).total_seconds(),
             "tables": tables,
             "tables_count": len(tables),
-            "total_rows": total_rows,
+            "total_rows_from_api": total_rows_from_api,
+            "total_rows_written": total_rows_written,
+            "total_rows_inserted": total_rows_inserted,
+            "total_rows_updated": total_rows_updated,
+            "total_rows_skipped": total_rows_skipped,
+            "total_rows_filtered": total_rows_filtered,
             "exit_code": exit_code,
             "errors": [],
             "metadata": metadata or {},
@@ -137,14 +154,16 @@ class ExecutionSummaryWriter:
         self._write_summary(summary)
 
         logger.success(
-            f"Execution summary written: {len(tables)} tables, {total_rows} rows"
+            f"Execution summary written: {len(tables)} tables, "
+            f"{total_rows_written} rows written ({total_rows_inserted} new + {total_rows_updated} updated) "
+            f"from {total_rows_from_api} API rows"
         )
 
     def write_partial_success(
         self,
         start_time: datetime,
         end_time: datetime,
-        tables_succeeded: Dict[str, pd.DataFrame],
+        tables_succeeded_stats: Dict[str, Dict[str, int]],
         tables_failed: List[str],
         errors: List[Dict[str, str]],
         exit_code: int = 3,
@@ -155,21 +174,31 @@ class ExecutionSummaryWriter:
         Args:
             start_time: Pipeline start timestamp
             end_time: Pipeline end timestamp
-            tables_succeeded: Dictionary of {table_name: DataFrame} that succeeded
+            tables_succeeded_stats: Dictionary of {table_name: LoadStats.to_dict()} that succeeded
             tables_failed: List of table names that failed
             errors: List of error dictionaries with 'table' and 'message' keys
             exit_code: Exit code (default: 3 for pipeline error)
             metadata: Optional additional metadata to include
         """
-        # Calculate total rows from successful tables
-        total_rows = sum(len(df) for df in tables_succeeded.values())
+        # Calculate totals from successful tables
+        total_rows_from_api = sum(stats.get("rows_from_api", 0) for stats in tables_succeeded_stats.values())
+        total_rows_written = sum(stats.get("rows_written", 0) for stats in tables_succeeded_stats.values())
+        total_rows_inserted = sum(stats.get("rows_inserted", 0) for stats in tables_succeeded_stats.values())
+        total_rows_updated = sum(stats.get("rows_updated", 0) for stats in tables_succeeded_stats.values())
 
         # Format successful tables
-        tables_success = self._format_tables(tables_succeeded, success=True)
+        tables_success = [
+            {
+                "name": table_name,
+                "success": True,
+                **stats,
+            }
+            for table_name, stats in tables_succeeded_stats.items()
+        ]
 
         # Format failed tables
         tables_fail = [
-            {"name": table_name, "success": False, "rows": 0, "error": "Failed"}
+            {"name": table_name, "success": False, "rows_from_api": 0, "rows_written": 0, "error": "Failed"}
             for table_name in tables_failed
         ]
 
@@ -188,7 +217,10 @@ class ExecutionSummaryWriter:
             "tables_count": len(all_tables),
             "tables_succeeded": len(tables_success),
             "tables_failed": len(tables_fail),
-            "total_rows": total_rows,
+            "total_rows_from_api": total_rows_from_api,
+            "total_rows_written": total_rows_written,
+            "total_rows_inserted": total_rows_inserted,
+            "total_rows_updated": total_rows_updated,
             "exit_code": exit_code,
             "errors": errors,
             "metadata": metadata or {},
@@ -199,7 +231,8 @@ class ExecutionSummaryWriter:
 
         logger.warning(
             f"Execution summary written (partial): "
-            f"{len(tables_success)}/{len(all_tables)} tables succeeded"
+            f"{len(tables_success)}/{len(all_tables)} tables succeeded, "
+            f"{total_rows_written} rows written from {total_rows_from_api} API rows"
         )
 
     def write_failure(
@@ -250,54 +283,6 @@ class ExecutionSummaryWriter:
 
         logger.error(f"Execution summary written (failure): {error_message}")
 
-    def _format_tables(
-        self, tables: Dict[str, pd.DataFrame], success: bool = True
-    ) -> List[Dict[str, Any]]:
-        """Format table processing results for summary.
-
-        Args:
-            tables: Dictionary of {table_name: DataFrame}
-            success: Whether tables were processed successfully
-
-        Returns:
-            List of table summary dictionaries
-        """
-        formatted = []
-
-        for table_name, df in tables.items():
-            table_info = {
-                "name": table_name,
-                "success": success,
-                "rows": len(df),
-                "columns": len(df.columns),
-                "column_names": list(df.columns)[:10],  # Limit to first 10 columns
-            }
-
-            # Add sample of first row if DataFrame not empty
-            if not df.empty and len(df.columns) > 0:
-                try:
-                    # Convert first row to dict, handling non-serializable types
-                    first_row = df.iloc[0].to_dict()
-                    sample = {}
-                    for k, v in first_row.items():
-                        # Only include first 5 columns for brevity
-                        if len(sample) >= 5:
-                            break
-                        # Convert to JSON-serializable type
-                        if pd.isna(v):
-                            sample[k] = None
-                        elif isinstance(v, (int, float, str, bool)):
-                            sample[k] = v
-                        else:
-                            sample[k] = str(v)
-
-                    table_info["sample"] = sample
-                except Exception as e:
-                    logger.debug(f"Could not create sample for {table_name}: {e}")
-
-            formatted.append(table_info)
-
-        return formatted
 
     def _write_summary(self, summary: Dict[str, Any]) -> None:
         """Write summary to stdout and Azure Blob Storage.

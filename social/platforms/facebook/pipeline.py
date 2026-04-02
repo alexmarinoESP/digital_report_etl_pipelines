@@ -77,8 +77,12 @@ class FacebookPipeline:
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         load_to_sink: bool = True,
-    ) -> pd.DataFrame:
-        """Run the pipeline for a single table."""
+    ) -> tuple[pd.DataFrame, Optional[Dict[str, int]]]:
+        """Run the pipeline for a single table.
+
+        Returns:
+            Tuple of (DataFrame, LoadStats dict) where LoadStats is None if not loaded
+        """
         logger.info(f"Starting pipeline for table: {table_name}")
         start_time = datetime.now()
 
@@ -91,7 +95,15 @@ class FacebookPipeline:
             df = self._extract_table(table_name, table_config, start_date, end_date)
             if df.empty:
                 logger.warning(f"No data extracted for {table_name}")
-                return df
+                empty_stats = {
+                    "rows_from_api": 0,
+                    "rows_inserted": 0,
+                    "rows_updated": 0,
+                    "rows_skipped": 0,
+                    "rows_filtered": 0,
+                    "rows_written": 0,
+                }
+                return df, empty_stats
 
             logger.success(f"Extracted {len(df)} rows for {table_name}")
 
@@ -99,48 +111,62 @@ class FacebookPipeline:
             processed_df = self._process_table(df, table_name, table_config)
             if processed_df.empty:
                 logger.warning(f"No data after processing for {table_name}")
-                return processed_df
+                empty_stats = {
+                    "rows_from_api": len(df),
+                    "rows_inserted": 0,
+                    "rows_updated": 0,
+                    "rows_skipped": 0,
+                    "rows_filtered": len(df),
+                    "rows_written": 0,
+                }
+                return processed_df, empty_stats
 
             logger.success(f"Processed {len(processed_df)} rows for {table_name}")
 
             # Load
+            stats = None
             if load_to_sink and self.data_sink:
-                self._load_to_sink(processed_df, table_name)
+                stats = self._load_to_sink(processed_df, table_name)
 
             duration = (datetime.now() - start_time).total_seconds()
             logger.success(f"Pipeline completed for {table_name} in {duration:.2f}s")
 
-            return processed_df
+            return processed_df, stats
 
         except Exception as e:
             logger.error(f"Pipeline failed for {table_name}: {str(e)}")
             raise PipelineError(f"Pipeline failed for {table_name}: {str(e)}") from e
 
-    def run_all_tables(self) -> tuple[Dict[str, pd.DataFrame], Dict[str, str]]:
+    def run_all_tables(self) -> tuple[Dict[str, Dict[str, int]], Dict[str, str]]:
         """Run the pipeline for all configured tables.
 
         Returns:
-            Tuple of (results, errors) where:
-            - results: Dict mapping table_name to DataFrame (may be empty for success with no data)
+            Tuple of (results_stats, errors) where:
+            - results_stats: Dict mapping table_name to LoadStats dict
             - errors: Dict mapping table_name to error message (only for tables that raised exceptions)
         """
         logger.info(f"Running pipeline for all {len(self.table_names)} tables")
-        results = {}
+        results_stats = {}
         errors = {}
 
         for table_name in self.table_names:
             try:
-                df = self.run(table_name, load_to_sink=True)
-                results[table_name] = df
+                df, stats = self.run(table_name, load_to_sink=True)
+                results_stats[table_name] = stats
             except Exception as e:
                 error_msg = str(e)
                 logger.error(f"Failed to process table {table_name}: {error_msg}")
-                results[table_name] = pd.DataFrame()
                 errors[table_name] = error_msg
 
-        successful = len([name for name in results if name not in errors])
-        logger.info(f"Pipeline completed: {successful}/{len(self.table_names)} tables successful")
-        return results, errors
+        successful = len([name for name in results_stats if name not in errors])
+        total_written = sum(stats.get("rows_written", 0) for stats in results_stats.values())
+        total_from_api = sum(stats.get("rows_from_api", 0) for stats in results_stats.values())
+
+        logger.info(
+            f"Pipeline completed: {successful}/{len(self.table_names)} tables successful, "
+            f"{total_written} rows written from {total_from_api} API rows"
+        )
+        return results_stats, errors
 
     def _extract_table(
         self,
@@ -153,6 +179,7 @@ class FacebookPipeline:
         try:
             table_type = table_config.get("type")
             date_preset = table_config.get("date_preset", "last_7d")
+            breakdowns = table_config.get("breakdowns")  # Extract breakdowns from config
 
             if table_type == "get_campaigns":
                 df = self.adapter.get_all_campaigns(date_preset=date_preset)
@@ -162,7 +189,8 @@ class FacebookPipeline:
                 if table_name == "fb_ads_insight_actions":
                     df = self.adapter.get_all_insights_with_actions(date_preset=date_preset)
                 else:
-                    df = self.adapter.get_all_insights(date_preset=date_preset)
+                    # Pass breakdowns to get_all_insights
+                    df = self.adapter.get_all_insights(date_preset=date_preset, breakdowns=breakdowns)
             elif table_type == "get_custom_conversions":
                 df = self.adapter.get_all_custom_conversions()
             else:
@@ -225,16 +253,26 @@ class FacebookPipeline:
 
         return processor.get_df()
 
-    def _load_to_sink(self, df: pd.DataFrame, table_name: str) -> None:
+    def _load_to_sink(self, df: pd.DataFrame, table_name: str) -> Dict[str, int]:
         """Load processed data to the configured data sink.
 
         Determines load mode from table configuration:
         - If 'increment' config exists → use increment mode
         - Otherwise → use append mode (default)
+
+        Returns:
+            LoadStats dict with rows_from_api, rows_inserted, rows_updated, etc.
         """
         if not self.data_sink:
             logger.warning("No data sink configured, skipping load")
-            return
+            return {
+                "rows_from_api": len(df),
+                "rows_inserted": 0,
+                "rows_updated": 0,
+                "rows_skipped": 0,
+                "rows_filtered": 0,
+                "rows_written": 0,
+            }
 
         try:
             # Get table configuration to determine load mode
@@ -266,20 +304,35 @@ class FacebookPipeline:
 
             # Write to sink with appropriate method
             if hasattr(self.data_sink, "load"):
-                # VerticaDataSink has load() with all modes
-                rows_written = self.data_sink.load(
+                # VerticaDataSink has load() with all modes - returns LoadStats
+                stats = self.data_sink.load(
                     df=df,
                     table_name=table_name,
                     mode=load_mode,
                     dedupe_columns=pk_columns,
                     increment_columns=increment_columns,
                 )
+                logger.success(
+                    f"Loaded {stats.rows_written} rows to {table_name} "
+                    f"({stats.rows_inserted} new + {stats.rows_updated} updated)"
+                )
+                return stats.to_dict()
             elif hasattr(self.data_sink, "write"):
                 # Fallback to write() method (older sinks - limited support)
                 if load_mode in ["increment", "upsert"]:
                     logger.warning(f"Data sink does not support {load_mode} mode, falling back to append")
                     load_mode = "append"
                 rows_written = self.data_sink.write(df=df, table_name=table_name, if_exists=load_mode)
+                logger.success(f"Loaded {rows_written} rows to {table_name}")
+                # Legacy sink returns int, convert to LoadStats dict
+                return {
+                    "rows_from_api": len(df),
+                    "rows_inserted": rows_written,
+                    "rows_updated": 0,
+                    "rows_skipped": 0,
+                    "rows_filtered": 0,
+                    "rows_written": rows_written,
+                }
             else:
                 raise PipelineError("Data sink has no compatible write/load method")
 

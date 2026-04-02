@@ -98,3 +98,27 @@ fields_ads_custom_audience = [
     CustomAudience.Field.account_id,
     CustomAudience.Field.pixel_id,
 ]
+
+# Placement breakdown fields
+# NOTE: publisher_platform is a breakdown dimension, not a field - it's returned automatically
+fields_ads_insight_placement = [
+    AdsInsights.Field.campaign_id,
+    AdsInsights.Field.impressions,
+    AdsInsights.Field.spend,
+    AdsInsights.Field.clicks,
+    AdsInsights.Field.ctr,
+    AdsInsights.Field.cpc,
+    AdsInsights.Field.cpm,
+]
+
+# Demographics breakdown fields
+# NOTE: age and gender are breakdown dimensions, not fields - they're returned automatically
+fields_ads_insight_demographics = [
+    AdsInsights.Field.campaign_id,
+    AdsInsights.Field.impressions,
+    AdsInsights.Field.spend,
+    AdsInsights.Field.clicks,
+    AdsInsights.Field.ctr,
+    AdsInsights.Field.cpc,
+    AdsInsights.Field.cpm,
+]
