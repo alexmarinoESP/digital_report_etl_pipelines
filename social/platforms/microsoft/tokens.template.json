@@ -1,0 +1,10 @@
+{
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "scope": "https://ads.microsoft.com/msads.manage offline_access",
+  "access_token": "YOUR_ACCESS_TOKEN_HERE",
+  "refresh_token": "YOUR_REFRESH_TOKEN_HERE",
+  "user_id": "YOUR_USER_ID_HERE",
+  "expires_at": 1234567890,
+  "refreshed_at": 1234567890
+}

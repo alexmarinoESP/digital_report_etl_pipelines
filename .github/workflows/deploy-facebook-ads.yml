@@ -16,6 +16,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Create sensitive config files from secrets
+        run: |
+          echo "${{ secrets.CREDENTIALS_YML }}" | base64 -d > social/config/credentials.yml
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 

@@ -16,6 +16,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Create sensitive config files from secrets
+        run: |
+          echo "${{ secrets.GOOGLE_ADS_CONFIG_9474097201 }}" | base64 -d > social/platforms/google/google-ads-9474097201.yml
+          echo "${{ secrets.GOOGLE_ADS_CONFIG_4619434319 }}" | base64 -d > social/platforms/google/google-ads-4619434319.yml
+          echo "${{ secrets.CREDENTIALS_YML }}" | base64 -d > social/config/credentials.yml
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
