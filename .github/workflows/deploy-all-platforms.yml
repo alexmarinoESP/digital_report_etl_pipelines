@@ -8,6 +8,7 @@ on:
       - 'shared/**'
       - 'social/infrastructure/**'
       - 'social/core/**'
+      - 'social/config/**'
       - 'pyproject.toml'
       - 'uv.lock'
   workflow_dispatch:  # Permette trigger manuale
