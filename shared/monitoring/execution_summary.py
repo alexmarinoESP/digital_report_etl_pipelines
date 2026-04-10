@@ -45,8 +45,44 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
+import numpy as np
 import pandas as pd
 from loguru import logger
+
+
+def _json_serializer(obj):
+    """Custom JSON serializer for numpy/pandas types.
+
+    Converts numpy/pandas numeric types to Python native types
+    to avoid string conversion in JSON output.
+
+    Args:
+        obj: Object to serialize
+
+    Returns:
+        JSON-serializable Python native type
+    """
+    # Handle numpy integer types
+    if isinstance(obj, np.integer):
+        return int(obj)
+    # Handle numpy floating types
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    # Handle numpy boolean
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    # Handle numpy arrays
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    # Handle pandas NA/NaT
+    elif pd.isna(obj):
+        return None
+    # Handle datetime
+    elif isinstance(obj, datetime):
+        return obj.isoformat()
+    # Fallback to string
+    else:
+        return str(obj)
 
 
 class ExecutionSummaryWriter:
@@ -310,7 +346,7 @@ class ExecutionSummaryWriter:
         Args:
             summary: Summary dictionary to write
         """
-        summary_json = json.dumps(summary, indent=2, default=str)
+        summary_json = json.dumps(summary, indent=2, default=_json_serializer)
 
         # Print with visual separators for easy log parsing
         print("\n" + "=" * 80)
@@ -357,7 +393,7 @@ class ExecutionSummaryWriter:
         blob_client = container_client.get_blob_client(blob_path)
 
         # Serialize summary to JSON
-        summary_json = json.dumps(summary, indent=2, default=str)
+        summary_json = json.dumps(summary, indent=2, default=_json_serializer)
 
         # Upload (overwrite is safe because path is unique with UUID)
         blob_client.upload_blob(
