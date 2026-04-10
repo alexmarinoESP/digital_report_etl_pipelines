@@ -50,13 +50,17 @@ WORKDIR /app
 # Copy application code
 COPY --chown=appuser:appuser social/ /app/social/
 COPY --chown=appuser:appuser shared/ /app/shared/
+COPY --chown=appuser:appuser social/platforms/microsoft/tokens.json /app/data/tokens.json
 
 # Set Python path
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
-# Set default token file location (will be overridden by Azure volume mount)
+# Set default token file location
 ENV TOKEN_FILE=/app/data/tokens.json
+
+# Enable container mode (no browser for OAuth)
+ENV CONTAINER_MODE=true
 
 # Switch to non-root user
 USER appuser
