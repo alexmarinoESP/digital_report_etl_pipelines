@@ -18,7 +18,19 @@ jobs:
 
       - name: Create sensitive config files from secrets
         run: |
-          echo "${{ secrets.MICROSOFT_TOKENS_JSON }}" | base64 -d > social/platforms/microsoft/tokens.json
+          # Debug: check if secret exists and decode it
+          if [ -z "${{ secrets.MICROSOFT_TOKENS_JSON }}" ]; then
+            echo "ERROR: MICROSOFT_TOKENS_JSON secret is empty!"
+            exit 1
+          fi
+          # Decode base64 secret to tokens.json
+          echo "${{ secrets.MICROSOFT_TOKENS_JSON }}" | base64 --decode > social/platforms/microsoft/tokens.json
+          # Verify the file was created and is valid JSON
+          if [ ! -s social/platforms/microsoft/tokens.json ]; then
+            echo "ERROR: tokens.json is empty after decoding!"
+            exit 1
+          fi
+          echo "✓ tokens.json created successfully ($(wc -c < social/platforms/microsoft/tokens.json) bytes)"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
