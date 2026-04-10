@@ -18,7 +18,7 @@ jobs:
 
       - name: Create sensitive config files from secrets
         run: |
-          echo "${{ secrets.MICROSOFT_TOKENS }}" | base64 -d > social/platforms/microsoft/tokens.json
+          echo "${{ secrets.MICROSOFT_TOKENS_JSON }}" | base64 -d > social/platforms/microsoft/tokens.json
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
