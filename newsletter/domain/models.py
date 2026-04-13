@@ -5,7 +5,7 @@ Pure data structures without business logic dependencies.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import List, Optional
 from PIL import Image
 
 
@@ -48,8 +48,7 @@ class Newsletter:
     source: str  # 'mapp' or 'dynamics'
     html_content: Optional[str] = None
     message_id: Optional[int] = None
-    contact_id: Optional[int] = None
-    contact_id_2: Optional[int] = None  # fallback contact (min USER_ID)
+    contact_ids: List[int] = field(default_factory=list)
     image_name: Optional[str] = None
 
     def __post_init__(self):

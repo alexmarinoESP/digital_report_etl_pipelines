@@ -69,27 +69,15 @@ class ExtractionService:
     ) -> Newsletter:
         """
         Enrich a Mapp newsletter with HTML content.
-        Uses fallback logic: tries contact_id first, then contact_id_2.
-
-        Args:
-            newsletter: Newsletter to enrich
-            client: Mapp client for API calls
-
-        Returns:
-            Enriched Newsletter
+        Tries each candidate contact_id in order until one succeeds.
         """
-        if not newsletter.message_id or not newsletter.contact_id:
+        if not newsletter.message_id or not newsletter.contact_ids:
             logger.warning(
-                f"Missing message_id or contact_id for {newsletter.newsletter_id}"
+                f"Missing message_id or contact_ids for {newsletter.newsletter_id}"
             )
             return newsletter
 
-        # Build list of contact IDs to try (primary, then fallback)
-        contact_ids = [newsletter.contact_id]
-        if newsletter.contact_id_2 and newsletter.contact_id_2 != newsletter.contact_id:
-            contact_ids.append(newsletter.contact_id_2)
-
-        for i, cid in enumerate(contact_ids):
+        for i, cid in enumerate(newsletter.contact_ids):
             try:
                 data = self._try_get_preview(client, newsletter.message_id, cid)
                 if data:
@@ -99,25 +87,26 @@ class ExtractionService:
                         newsletter.image_name = f"{external_id}.png"
                     if i > 0:
                         logger.debug(
-                            f"Fallback contact_id_2 worked for {newsletter.newsletter_id}"
+                            f"Fallback contact #{i + 1} ({cid}) worked for {newsletter.newsletter_id}"
                         )
                     return newsletter
 
             except RecipientNotFoundError:
-                label = "contact_id" if i == 0 else "contact_id_2"
                 logger.debug(
-                    f"Recipient {cid} ({label}) not found for {newsletter.newsletter_id}"
+                    f"Recipient {cid} (#{i + 1}/{len(newsletter.contact_ids)}) "
+                    f"not found for {newsletter.newsletter_id}"
                 )
                 continue
 
             except Exception as e:
                 logger.warning(
-                    f"Failed to enrich newsletter {newsletter.newsletter_id}: {e}"
+                    f"Failed to enrich newsletter {newsletter.newsletter_id} with contact {cid}: {e}"
                 )
                 return newsletter
 
         logger.warning(
-            f"All contact IDs exhausted for newsletter {newsletter.newsletter_id}, skipping"
+            f"All {len(newsletter.contact_ids)} contact IDs exhausted for "
+            f"newsletter {newsletter.newsletter_id}, skipping"
         )
         return newsletter
 

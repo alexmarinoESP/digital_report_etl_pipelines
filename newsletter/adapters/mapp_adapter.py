@@ -128,6 +128,14 @@ class MappAdapter(IMappClient):
             logger.error(f"Mapp API request failed: {e}")
             raise MappApiError(f"Request failed: {e}") from e
 
+    @staticmethod
+    def _extract_html(data: Optional[Dict[str, Any]]) -> str:
+        """Extract email HTML body from Mapp getHistorical response."""
+        if not data:
+            return ""
+        type_section = data.get("type") or {}
+        return type_section.get("emailBodyHtml") or ""
+
     def get_html_content(self, message_id: int, contact_id: int) -> Optional[str]:
         """
         Get HTML content for a newsletter.
@@ -142,10 +150,7 @@ class MappAdapter(IMappClient):
         try:
             params = {"messageId": message_id, "contactId": contact_id}
             data = self._request(self.ENDPOINT_PREVIEW, params)
-
-            if data:
-                return data.get("htmlVersion", "")
-            return None
+            return self._extract_html(data) or None
 
         except MappApiError:
             return None
@@ -176,21 +181,23 @@ class MappAdapter(IMappClient):
         self, message_id: int, contact_id: int
     ) -> Optional[Dict[str, Any]]:
         """
-        Get full preview data including HTML and external ID.
+        Get normalized preview data for a newsletter.
 
-        Args:
-            message_id: Mapp message ID
-            contact_id: Mapp contact ID
-
-        Returns:
-            Dictionary with htmlVersion and externalId, or None
+        Returns a flat dict with `htmlVersion` and `externalId`, abstracting
+        away Mapp's nested response shape (HTML lives at type.emailBodyHtml).
 
         Raises:
             RecipientNotFoundError: If the contact does not exist in Mapp
         """
         try:
             params = {"messageId": message_id, "contactId": contact_id}
-            return self._request(self.ENDPOINT_PREVIEW, params)
+            data = self._request(self.ENDPOINT_PREVIEW, params)
+            if not data:
+                return None
+            return {
+                "htmlVersion": self._extract_html(data),
+                "externalId": data.get("externalId"),
+            }
         except RecipientNotFoundError:
             raise
         except MappApiError:

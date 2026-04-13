@@ -25,14 +25,34 @@ from shared.connection.vertica import VerticaConnection
 # =============================================================================
 
 QUERY_MAPP_NEWSLETTERS = """
-SELECT DISTINCT d.COMPANYID, f.MESSAGE_EXTERNALID AS NEWSLETTERID, f.MESSAGE_ID, max(f.USER_ID) as CONTACT_ID,
-min(f.USER_ID) as CONTACT_ID_2
-FROM ESPODS.ESP_ODS_MAPP_RENDER f
-JOIN ESPDDS.ESP_DCAMPAIGN_NEW d
-on d.newsletterid = f.message_externalid
-WHERE YEAR(CAST(f.RENDER_TIMESTAMP AS DATE)) >= YEAR(CURRENT_DATE)-{{years_behind | sqlsafe}}
-AND d.COMPANYID={{comp_id | sqlsafe}}
-GROUP BY d.COMPANYID, f.MESSAGE_EXTERNALID, f.MESSAGE_ID
+WITH distinct_users AS (
+    SELECT d.COMPANYID,
+           f.MESSAGE_EXTERNALID AS NEWSLETTERID,
+           f.MESSAGE_ID,
+           f.USER_ID,
+           MAX(f.RENDER_TIMESTAMP) AS LAST_RENDER
+    FROM ESPODS.ESP_ODS_MAPP_RENDER f
+    JOIN ESPDDS.ESP_DCAMPAIGN_NEW d
+      ON d.newsletterid = f.message_externalid
+    WHERE YEAR(CAST(f.RENDER_TIMESTAMP AS DATE)) >= YEAR(CURRENT_DATE)-{{years_behind | sqlsafe}}
+      AND d.COMPANYID={{comp_id | sqlsafe}}
+    GROUP BY d.COMPANYID, f.MESSAGE_EXTERNALID, f.MESSAGE_ID, f.USER_ID
+),
+ranked AS (
+    SELECT COMPANYID,
+           NEWSLETTERID,
+           MESSAGE_ID,
+           USER_ID,
+           ROW_NUMBER() OVER (
+               PARTITION BY NEWSLETTERID
+               ORDER BY LAST_RENDER DESC, USER_ID
+           ) AS rn
+    FROM distinct_users
+)
+SELECT COMPANYID, NEWSLETTERID, MESSAGE_ID, USER_ID AS CONTACT_ID, rn
+FROM ranked
+WHERE rn <= 10
+ORDER BY NEWSLETTERID, rn
 """
 
 QUERY_DYNAMICS_NEWSLETTERS = """
@@ -178,21 +198,30 @@ class NewsletterRepositoryAdapter(INewsletterRepository):
                 logger.info(f"No Mapp newsletters found for {company.code}")
                 return []
 
-            # Remove duplicates
-            df.drop_duplicates(subset=["NEWSLETTERID"], inplace=True)
-
-            # Convert to Newsletter objects
-            newsletters = []
+            # Aggregate rows by newsletter: each row is one (newsletter, contact)
+            # candidate, ordered by recency. Collect up to N contacts per newsletter.
+            newsletters_by_id: Dict[str, Newsletter] = {}
             for _, row in df.iterrows():
-                newsletter = Newsletter(
-                    newsletter_id=self._decode_bytes(row.get("NEWSLETTERID", "")),
-                    company=company,
-                    source="mapp",
-                    message_id=int(row.get("MESSAGE_ID", 0)) if row.get("MESSAGE_ID") else None,
-                    contact_id=int(row.get("CONTACT_ID", 0)) if row.get("CONTACT_ID") else None,
-                    contact_id_2=int(row.get("CONTACT_ID_2", 0)) if row.get("CONTACT_ID_2") else None,
-                )
-                newsletters.append(newsletter)
+                nl_id = self._decode_bytes(row.get("NEWSLETTERID", ""))
+                if not nl_id:
+                    continue
+
+                contact_raw = row.get("CONTACT_ID")
+                contact_id = int(contact_raw) if contact_raw else None
+
+                if nl_id not in newsletters_by_id:
+                    newsletters_by_id[nl_id] = Newsletter(
+                        newsletter_id=nl_id,
+                        company=company,
+                        source="mapp",
+                        message_id=int(row.get("MESSAGE_ID", 0)) if row.get("MESSAGE_ID") else None,
+                        contact_ids=[],
+                    )
+
+                if contact_id is not None and contact_id not in newsletters_by_id[nl_id].contact_ids:
+                    newsletters_by_id[nl_id].contact_ids.append(contact_id)
+
+            newsletters = list(newsletters_by_id.values())
 
             logger.info(f"Retrieved {len(newsletters)} Mapp newsletters for {company.code}")
             return newsletters
