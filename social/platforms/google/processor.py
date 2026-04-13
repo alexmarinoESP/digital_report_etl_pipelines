@@ -614,27 +614,22 @@ class GoogleProcessor:
         if self.df.empty:
             return self
 
-        # DEBUG
-        logger.warning(f"dropna_value BEFORE: columns={self.df.columns.tolist()}, 'id' present={'id' in self.df.columns}")
-
         original_count = len(self.df)
 
         # Log columns with NaN values BEFORE dropping
         nan_cols = [col for col in self.df.columns if self.df[col].isna().any()]
         if nan_cols:
-            logger.debug(f"Columns with NaN values: {nan_cols}")
+            logger.warning(f"🔍 PLACEMENT DEBUG - dropna_value: Columns with NaN values: {nan_cols}")
             for col in nan_cols:
                 nan_count = self.df[col].isna().sum()
-                logger.debug(f"  {col}: {nan_count} NaN values ({nan_count/original_count*100:.1f}%)")
+                logger.warning(f"   ├─ {col}: {nan_count} NaN values ({nan_count/original_count*100:.1f}%)")
 
         self.df = self.df.dropna()
         dropped = original_count - len(self.df)
 
         if dropped > 0:
-            logger.debug(f"Dropped {dropped} rows with NaN values")
-
-        # DEBUG
-        logger.warning(f"dropna_value AFTER: columns={self.df.columns.tolist()}, 'id' present={'id' in self.df.columns}")
+            percent_dropped = (dropped / original_count * 100) if original_count > 0 else 0
+            logger.warning(f"🔍 PLACEMENT DEBUG - dropna_value: Dropped {dropped} rows ({percent_dropped:.1f}%) with NaN values")
 
         return self
 
@@ -659,13 +654,15 @@ class GoogleProcessor:
             self.df = self.df.drop_duplicates(subset=subset, keep='last')
             dropped = original_count - len(self.df)
             if dropped > 0:
-                logger.debug(f"Dropped {dropped} duplicate rows on columns {subset}")
+                percent_dropped = (dropped / original_count * 100) if original_count > 0 else 0
+                logger.warning(f"🔍 PLACEMENT DEBUG - drop_duplicates: Dropped {dropped} duplicate rows ({percent_dropped:.1f}%) on columns {subset}")
         else:
             # Drop exact duplicates (all columns)
             self.df = self.df.drop_duplicates()
             dropped = original_count - len(self.df)
             if dropped > 0:
-                logger.debug(f"Dropped {dropped} duplicate rows")
+                percent_dropped = (dropped / original_count * 100) if original_count > 0 else 0
+                logger.warning(f"🔍 PLACEMENT DEBUG - drop_duplicates: Dropped {dropped} duplicate rows ({percent_dropped:.1f}%)")
 
         return self
 
@@ -830,14 +827,30 @@ class GoogleProcessor:
             return self
 
         # DEBUG
-        logger.warning(f"limit_placement BEFORE: columns={self.df.columns.tolist()}, 'id' present={'id' in self.df.columns}")
+        logger.warning(f"🔍 PLACEMENT DEBUG - limit_placement BEFORE: {len(self.df)} rows")
 
         if "impressions" not in self.df.columns or "id" not in self.df.columns:
             logger.warning("Missing required columns for placement limit, skipping")
-            logger.warning(f"limit_placement AFTER (skipped): columns={self.df.columns.tolist()}")
+            logger.warning(f"Available columns: {self.df.columns.tolist()}")
             return self
 
         try:
+            # Show stats before limiting
+            unique_ad_groups_before = self.df["id"].nunique()
+            total_rows_before = len(self.df)
+            avg_placements_per_group = total_rows_before / unique_ad_groups_before if unique_ad_groups_before > 0 else 0
+
+            logger.warning(f"🔍 PLACEMENT DEBUG - Before limit_placement:")
+            logger.warning(f"   ├─ Total rows: {total_rows_before}")
+            logger.warning(f"   ├─ Unique ad_groups: {unique_ad_groups_before}")
+            logger.warning(f"   └─ Avg placements per ad_group: {avg_placements_per_group:.2f}")
+
+            # Show top 10 ad_groups by placement count
+            placement_counts = self.df.groupby("id").size().sort_values(ascending=False).head(10)
+            logger.warning(f"🔍 PLACEMENT DEBUG - Top 10 ad_groups by placement count:")
+            for ad_group_id, count in placement_counts.items():
+                logger.warning(f"   ├─ ad_group {ad_group_id}: {count} placements")
+
             # Convert impressions to int
             self.df["impressions"] = self.df["impressions"].astype(int)
 
@@ -845,8 +858,19 @@ class GoogleProcessor:
             self.df = self.df.sort_values(by=["id", "impressions"], ascending=[True, False])
             self.df = self.df.groupby("id").head(25).reset_index(drop=True)
 
+            # Show stats after limiting
+            unique_ad_groups_after = self.df["id"].nunique()
+            total_rows_after = len(self.df)
+            rows_removed = total_rows_before - total_rows_after
+            percent_removed = (rows_removed / total_rows_before * 100) if total_rows_before > 0 else 0
+
+            logger.warning(f"🔍 PLACEMENT DEBUG - After limit_placement:")
+            logger.warning(f"   ├─ Total rows: {total_rows_after}")
+            logger.warning(f"   ├─ Unique ad_groups: {unique_ad_groups_after}")
+            logger.warning(f"   ├─ Rows removed: {rows_removed} ({percent_removed:.1f}%)")
+            logger.warning(f"   └─ Max placements per ad_group: 25")
+
             logger.debug("Limited placements to top 25 per ad group")
-            logger.warning(f"limit_placement AFTER: columns={self.df.columns.tolist()}, 'id' present={'id' in self.df.columns}")
 
         except Exception as e:
             logger.warning(f"Failed to limit placements: {e}")

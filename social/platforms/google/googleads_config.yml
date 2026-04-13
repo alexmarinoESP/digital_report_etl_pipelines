@@ -1,17 +1,7 @@
-# =============================================================================
-# Google Ads Configuration - NEW SIMPLIFIED APPROACH
-# =============================================================================
-# This config uses the new SimpleGoogleProcessor with explicit column_mapping.yml
-#
-# Key changes:
-# - use_simple_processor: true (enables new processor)
-# - NO MORE: handle_columns, rename_columns, dropna_value
-# - Processing is transparent via column_mapping.yml
-# =============================================================================
-
-# Placement table
 google_ads_placement:
-  queryget: [query_placement, query_placement_2]
+  queryget:
+  - query_placement
+  - query_placement_2
   type: SearchGoogleAdsRequest
   use_simple_processor: true
   processing:
@@ -21,25 +11,26 @@ google_ads_placement:
   day: 600
   query:
     column_name:
-      - id
-      - placement
-  truncate: True
-
-# Ad Creatives table
+    - id
+    - placement
+  truncate: true
+  dedupe_columns:
+  - id
+  - placement
 google_ads_ad_creatives:
-  queryget: [query_ads_ad_creatives]
+  queryget:
+  - query_ads_ad_creatives
   type: SearchGoogleAdsStreamRequest
   use_simple_processor: true
   processing: {}
   scope: GoogleAdsService
   query:
     column_name:
-      - ad_id
-      - adgroup_id
-
-# Campaign table
+    - ad_id
+    - adgroup_id
 google_ads_campaign:
-  queryget: [query_campaign]
+  queryget:
+  - query_campaign
   type: SearchGoogleAdsStreamRequest
   use_simple_processor: true
   processing: {}
@@ -47,21 +38,20 @@ google_ads_campaign:
   day: 150
   query:
     column_name:
-      - id
+    - id
   merge:
     table_name_source: google_ads_campaign_source
     fields_id:
-      - id
+    - id
     table_name_check:
-      - google_ads_campaign
+    - google_ads_campaign
     fields_update:
-      - serving_status
-      - status
-      - name
-
-# Report table (loads to _source, then aggregates)
+    - serving_status
+    - status
+    - name
 google_ads_report:
-  queryget: [query_ad_report]
+  queryget:
+  - query_ad_report
   type: SearchGoogleAdsStreamRequest
   use_simple_processor: true
   processing: {}
@@ -69,45 +59,49 @@ google_ads_report:
   day: 150
   query:
     column_name:
-      - campaign_id
-      - adgroup_id
-      - ad_id
-      - date
+    - campaign_id
+    - adgroup_id
+    - ad_id
+    - date
   merge:
     table_name_source: google_ads_report_source
     fields_id:
-      - campaign_id
-      - adgroup_id
-      - ad_id
-      - date
+    - campaign_id
+    - adgroup_id
+    - ad_id
+    - date
     table_name_check:
-      - google_ads_report
+    - google_ads_report
     fields_update:
-      - clicks
-      - impressions
-      - conversions
-      - costmicros
-      - averagecpm
-      - averagecpc
-      - averagecost
-      - ctr
-
-# Audience table
+    - clicks
+    - impressions
+    - conversions
+    - costmicros
+    - averagecpm
+    - averagecpc
+    - averagecost
+    - ctr
 google_ads_audience:
-  queryget: [query_audience, query_audience_2]
+  queryget:
+  - query_audience
+  - query_audience_2
   type: SearchGoogleAdsRequest
   use_simple_processor: true
   processing: {}
   scope: SearchGoogleAdsRequest
   query:
     column_name:
-      - id
-      - display_name
-  truncate: True
-
-# Cost by Device table
+    - id
+    - display_name
+  truncate: true
+  append:
+    pk_columns:
+    - id
+    - placement
 google_ads_cost_by_device:
-  queryget: [query_by_device, query_by_device_2]
+  queryget:
+  - query_by_device
+  - query_by_device_2
   type: SearchGoogleAdsRequest
   use_simple_processor: true
   processing:
@@ -115,11 +109,13 @@ google_ads_cost_by_device:
   scope: account
   query:
     column_name:
-      - ad_id
-      - device
-  truncate: True
-
-# Account table (hierarchy)
+    - ad_id
+    - device
+  truncate: true
+  append:
+    pk_columns:
+    - id
+    - placement
 google_ads_account:
   queryget: []
   request: []
@@ -128,20 +124,25 @@ google_ads_account:
   scope: account
   query:
     column_name:
-      - id
-  truncate: True
-
-# Violation (alert only, no DB insert)
+    - id
+  truncate: true
+  append:
+    pk_columns:
+    - id
+    - placement
 google_ads_violation:
-  queryget: [query_violation_policy]
+  queryget:
+  - query_violation_policy
   type: SearchGoogleAdsRequest
   use_simple_processor: true
   processing: {}
   scope: account
-  avoid_insert_data: True
+  avoid_insert_data: true
   send_alert:
     recipients:
-      - DataScience@esprinet.com
-      - angeliki.kouroupi@esprinet.com
+    - DataScience@esprinet.com
+    - angeliki.kouroupi@esprinet.com
     subject: 'Violation policy alert: Google ads'
-    message: 'This email contains information regarding ads that are labelled with LIMITED_APPROVAL status belonging to campaign with status ENABLED.<br> For any additional information write to: DataScience@esprinet.com'
+    message: 'This email contains information regarding ads that are labelled with
+      LIMITED_APPROVAL status belonging to campaign with status ENABLED.<br> For any
+      additional information write to: DataScience@esprinet.com'

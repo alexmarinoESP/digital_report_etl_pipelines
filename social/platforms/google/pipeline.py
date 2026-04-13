@@ -172,11 +172,34 @@ class GooglePipeline:
 
             logger.success(f"Extracted {len(df)} rows for {table_name}")
 
+            # DEBUG: Log placement-specific data
+            if table_name == "google_ads_placement":
+                logger.warning(f"🔍 PLACEMENT DEBUG - AFTER EXTRACTION (before processing):")
+                logger.warning(f"   ├─ Rows from API: {len(df)}")
+                logger.warning(f"   ├─ Columns: {df.columns.tolist()}")
+                if 'ad_group.id' in df.columns:
+                    logger.warning(f"   └─ Unique ad_groups: {df['ad_group.id'].nunique()}")
+
             # Process the data
             logger.info(f"Processing data for {table_name}")
             processed_df = self._process_table(df, table_name, table_config)
 
             logger.success(f"Processing complete: {len(processed_df)} rows, {len(processed_df.columns)} columns")
+
+            # DEBUG: Log placement-specific data after processing
+            if table_name == "google_ads_placement":
+                logger.warning(f"🔍 PLACEMENT DEBUG - AFTER PROCESSING (before load):")
+                logger.warning(f"   ├─ Rows after processing: {len(processed_df)}")
+                logger.warning(f"   ├─ Columns: {processed_df.columns.tolist()}")
+                if 'id' in processed_df.columns:
+                    logger.warning(f"   └─ Unique ad_groups: {processed_df['id'].nunique()}")
+
+                # Calculate loss percentage
+                rows_lost = len(df) - len(processed_df)
+                percent_lost = (rows_lost / len(df) * 100) if len(df) > 0 else 0
+                logger.warning(f"🔍 PLACEMENT DEBUG - DATA LOSS in processing:")
+                logger.warning(f"   ├─ Rows lost: {rows_lost}")
+                logger.warning(f"   └─ Percentage lost: {percent_lost:.1f}%")
 
             # Load to sink if configured
             stats = None
@@ -276,8 +299,8 @@ class GooglePipeline:
 
         # Summary
         successful = len([name for name in results_stats if name not in errors])
-        total_written = sum(stats.get("rows_written", 0) for stats in results_stats.values())
-        total_from_api = sum(stats.get("rows_from_api", 0) for stats in results_stats.values())
+        total_written = sum(stats.get("rows_written", 0) for stats in results_stats.values() if stats is not None)
+        total_from_api = sum(stats.get("rows_from_api", 0) for stats in results_stats.values() if stats is not None)
 
         logger.info(
             f"Pipeline batch complete: "
@@ -498,7 +521,12 @@ class GooglePipeline:
 
             elif table_config.get("truncate", False):
                 load_mode = "replace"  # Truncate and insert
-                logger.debug(f"Using replace mode for {table_name}")
+                # Support explicit dedupe_columns for replace mode
+                if "dedupe_columns" in table_config:
+                    pk_columns = table_config["dedupe_columns"]
+                    logger.debug(f"Using replace mode for {table_name} with dedupe_columns={pk_columns}")
+                else:
+                    logger.debug(f"Using replace mode for {table_name}")
 
             elif table_config.get("update"):
                 # Legacy: 'update' config → map to 'upsert'

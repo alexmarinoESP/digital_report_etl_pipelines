@@ -187,16 +187,23 @@ class VerticaDataSink:
             if dedupe_columns is None:
                 dedupe_columns = self._detect_pk_columns(df)
                 if dedupe_columns:
-                    logger.warning(f"Auto-detected PK columns for {final_table_name}: {dedupe_columns}")
-                    logger.warning(f"DataFrame columns present: {list(df.columns)}")
+                    logger.error(f"🔴 AUTO-DETECTED PK columns for {final_table_name}: {dedupe_columns}")
+                    logger.error(f"   DataFrame columns present: {list(df.columns)}")
+            else:
+                logger.error(f"🟢 EXPLICIT dedupe_columns provided for {final_table_name}: {dedupe_columns}")
 
             # STEP 2: Remove duplicates WITHIN the DataFrame itself
             initial_rows = len(df)
+            logger.error(f"🔍 BEFORE drop_duplicates: {initial_rows} rows, dedupe_columns={dedupe_columns}")
+
             # Always deduplicate on PK columns if available (to avoid false duplicates from timestamp columns)
             if dedupe_columns:
                 keep_strategy = 'last' if mode in ["upsert", "increment"] else 'first'
                 df = df.drop_duplicates(subset=dedupe_columns, keep=keep_strategy)
                 duplicates_removed = initial_rows - len(df)
+
+                logger.error(f"🔍 AFTER drop_duplicates: {len(df)} rows (removed {duplicates_removed})")
+
                 if duplicates_removed > 0:
                     logger.warning(
                         f"Removed {duplicates_removed} duplicate rows (by PK {dedupe_columns}) "
@@ -219,7 +226,7 @@ class VerticaDataSink:
             if mode == "replace":
                 # REPLACE: Truncate + Insert all
                 self._truncate_table(cursor, final_table_name)
-                rows_inserted = self._copy_to_db(cursor, final_table_name, df)
+                rows_inserted = self._copy_to_db(cursor, final_table_name, df, pk_columns=dedupe_columns)
                 logger.info(f"✓ Replaced {rows_inserted} rows in {final_table_name}")
                 return LoadStats(
                     rows_from_api=rows_from_api,
@@ -844,13 +851,14 @@ class VerticaDataSink:
 
         return pk_candidates
 
-    def _copy_to_db(self, cursor, table_name: str, df: pd.DataFrame) -> int:
+    def _copy_to_db(self, cursor, table_name: str, df: pd.DataFrame, pk_columns: Optional[List[str]] = None) -> int:
         """Write DataFrame to database using COPY command.
 
         Args:
             cursor: Database cursor
             table_name: Target table
             df: DataFrame to write
+            pk_columns: Primary key columns (if None, will auto-detect)
 
         Returns:
             Number of rows written
@@ -858,16 +866,23 @@ class VerticaDataSink:
         Raises:
             DatabaseError: If COPY fails
         """
-        # Detect PK columns FIRST (before any deduplication)
-        pk_columns = self._detect_pk_columns(df)
+        # Use provided PK columns or auto-detect if not provided
+        if pk_columns is None:
+            pk_columns = self._detect_pk_columns(df)
+            logger.error(f"🔴 _copy_to_db AUTO-DETECTED PK: {pk_columns}")
+        else:
+            logger.error(f"🟢 _copy_to_db USING PROVIDED PK: {pk_columns}")
 
         # Drop duplicates ONLY on PK columns (not all columns, to avoid false duplicates from timestamps)
+        # NOTE: This should normally not remove anything since load() already deduplicated
         if pk_columns:
             rows_before = len(df)
             df = df.drop_duplicates(subset=pk_columns, keep='first')
             rows_dropped = rows_before - len(df)
             if rows_dropped > 0:
-                logger.debug(f"Dropped {rows_dropped} duplicate rows based on PK columns: {pk_columns}")
+                logger.error(f"🔴 _copy_to_db DROPPED {rows_dropped} duplicates with PK {pk_columns}!")
+            else:
+                logger.error(f"🟢 _copy_to_db: No duplicates to drop (already clean)")
 
         # Replace all NaT values with None before converting to list
         # This is necessary because .values.tolist() converts NaT to string "NaT"

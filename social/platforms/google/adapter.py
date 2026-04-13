@@ -363,12 +363,16 @@ class GoogleAdapter:
         if start_date is None:
             start_date = end_date - timedelta(days=600)  # Placements use longer lookback
 
+        logger.warning(f"🔍 PLACEMENT DEBUG - Date range: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')} ({(end_date - start_date).days} days)")
+
         # Get enabled customer accounts
         accounts = self._get_enabled_customer_accounts()
 
         if accounts.empty:
             logger.warning("No enabled customer accounts found")
             return pd.DataFrame()
+
+        logger.warning(f"🔍 PLACEMENT DEBUG - Found {len(accounts)} enabled customer accounts")
 
         # Execute both queries for each account
         all_data = []
@@ -377,11 +381,16 @@ class GoogleAdapter:
             ("query_placement_2", GAQL_QUERIES["query_placement_2"]),
         ]
 
+        total_rows_per_query = {}
+        total_rows_per_account = {}
+
         for query_name, query_template in queries:
             query = query_template.format(
                 start_date.strftime("%Y-%m-%d"),
                 end_date.strftime("%Y-%m-%d"),
             )
+
+            query_total = 0
 
             for _, account in accounts.iterrows():
                 customer_id = str(account["id"])
@@ -398,15 +407,43 @@ class GoogleAdapter:
 
                     if not df.empty:
                         all_data.append(df)
-                        logger.debug(f"Retrieved {len(df)} placements from {account_name} ({query_name})")
+                        query_total += len(df)
+
+                        # Track per account
+                        if customer_id not in total_rows_per_account:
+                            total_rows_per_account[customer_id] = 0
+                        total_rows_per_account[customer_id] += len(df)
+
+                        logger.warning(f"🔍 PLACEMENT DEBUG - {query_name} for account {account_name} ({customer_id}): {len(df)} placements")
+
+                        # Show unique ad_group.id count
+                        if 'ad_group.id' in df.columns:
+                            unique_ad_groups = df['ad_group.id'].nunique()
+                            logger.warning(f"   └─ Unique ad_groups: {unique_ad_groups}")
+                        elif 'id' in df.columns:
+                            unique_ad_groups = df['id'].nunique()
+                            logger.warning(f"   └─ Unique ad_groups (id column): {unique_ad_groups}")
 
                 except Exception as e:
                     logger.warning(f"Failed to query account {customer_id}: {str(e)}")
                     continue
 
+            total_rows_per_query[query_name] = query_total
+            logger.warning(f"🔍 PLACEMENT DEBUG - {query_name} TOTAL: {query_total} placements")
+
         # Combine all results
         if all_data:
             combined_df = pd.concat(all_data, ignore_index=True)
+
+            logger.warning(f"🔍 PLACEMENT DEBUG - COMBINED TOTAL FROM API: {len(combined_df)} placements")
+            logger.warning(f"🔍 PLACEMENT DEBUG - Breakdown by query: {total_rows_per_query}")
+            logger.warning(f"🔍 PLACEMENT DEBUG - Breakdown by account: {total_rows_per_account}")
+
+            # Check for duplicates
+            if 'ad_group.id' in combined_df.columns and 'group_placement_view.placement' in combined_df.columns:
+                duplicates = combined_df.duplicated(subset=['ad_group.id', 'group_placement_view.placement']).sum()
+                logger.warning(f"🔍 PLACEMENT DEBUG - Duplicate rows (ad_group.id + placement): {duplicates}")
+
             logger.success(f"Retrieved {len(combined_df)} total placements")
             return combined_df
         else:

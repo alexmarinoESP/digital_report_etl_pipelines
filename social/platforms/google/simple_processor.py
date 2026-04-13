@@ -175,7 +175,7 @@ class SimpleGoogleProcessor:
             return df
 
         if 'id' not in df.columns or 'impressions' not in df.columns:
-            logger.warning(f"[{self.table_name}] Missing 'id' or 'impressions' columns, skipping limit_placement")
+            logger.error(f"[{self.table_name}] Missing 'id' or 'impressions' columns, skipping limit_placement")
             return df
 
         try:
@@ -187,7 +187,7 @@ class SimpleGoogleProcessor:
             df = df.sort_values(by=['id', 'impressions'], ascending=[True, False])
             df = df.groupby('id').head(25).reset_index(drop=True)
 
-            logger.info(f"[{self.table_name}] Limited to top 25 placements per ad group")
+            logger.warning(f"[{self.table_name}] Limited to top 25 placements per ad group")
             return df
 
         except Exception as e:
