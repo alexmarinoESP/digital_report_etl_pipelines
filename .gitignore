@@ -60,7 +60,6 @@ credentials.yaml
 credentials.json
 *.credentials
 page_access_token.json
-google-ads-*.yml
 config.yml
 !**/config.example.yml
 

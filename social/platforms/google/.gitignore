@@ -1,5 +1,5 @@
 # Google Ads credentials files
-google-ads-*.yml
+# google-ads-*.yml — now committed (baked into Docker image)
 google-ads.yaml
 
 # Token files
