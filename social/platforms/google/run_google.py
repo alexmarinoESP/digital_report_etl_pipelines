@@ -18,8 +18,13 @@ Exit Codes:
 - 4: Data sink error
 
 Environment Variables:
-- GOOGLE_ADS_CONFIG_FILE: Path to google-ads.yaml config file
-- GOOGLE_MANAGER_CUSTOMER_ID: Manager account ID (MCC)
+- GOOGLE_ADS_CONFIG_FILES: Comma- or semicolon-separated list of google-ads.yaml
+  config files. Each tenant runs sequentially in the same process. Optional —
+  if absent, falls back to GOOGLE_ADS_CONFIG_FILE (single tenant).
+- GOOGLE_ADS_CONFIG_FILE: (legacy / single-tenant) Path to one google-ads.yaml.
+- GOOGLE_MANAGER_CUSTOMER_ID: (single-tenant only) Manager account ID (MCC).
+  Ignored when GOOGLE_ADS_CONFIG_FILES is set: the MCC is read from each
+  config's `login_customer_id`.
 - GOOGLE_API_VERSION: Google Ads API version (default: v18)
 - STORAGE_TYPE: Storage backend (vertica, azure, or none)
 - VERTICA_HOST, VERTICA_PORT, VERTICA_DATABASE, VERTICA_USER, VERTICA_PASSWORD
@@ -29,7 +34,9 @@ Environment Variables:
 import os
 import sys
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
+
+import yaml
 
 from loguru import logger
 
@@ -41,6 +48,28 @@ from social.core.exceptions import (
 from social.infrastructure.file_token_provider import FileBasedTokenProvider
 from social.platforms.google.constants import API_VERSION
 from social.platforms.google.pipeline import GooglePipeline, load_config
+
+
+class _GoogleNoopTokenProvider:
+    """Inert TokenProvider used as a placeholder for Google Ads.
+
+    Google Ads picks credentials directly from google-ads.yaml; the adapter
+    only requires *something* matching the TokenProvider Protocol shape.
+    None of these methods is called at runtime for Google.
+    """
+
+    def get_access_token(self) -> str:  # pragma: no cover
+        raise NotImplementedError("Google Ads uses google-ads.yaml, not a token provider")
+
+    def get_refresh_token(self) -> str:  # pragma: no cover
+        raise NotImplementedError("Google Ads uses google-ads.yaml, not a token provider")
+
+    def refresh_access_token(self) -> str:  # pragma: no cover
+        raise NotImplementedError("Google Ads uses google-ads.yaml, not a token provider")
+
+    def get_token_expiry(self):  # pragma: no cover
+        from datetime import datetime, timedelta, timezone
+        return datetime.now(timezone.utc) + timedelta(days=365)
 
 
 def setup_logging() -> None:
@@ -83,7 +112,8 @@ def get_config_path() -> Path:
 
 def get_google_ads_config_file() -> str:
     """
-    Get path to google-ads.yaml credentials file from environment.
+    Get path to google-ads.yaml credentials file from environment (single-tenant
+    legacy path).
 
     Returns:
         Path to google-ads.yaml file
@@ -116,6 +146,63 @@ def get_google_ads_config_file() -> str:
 
     logger.info(f"Using Google Ads config file: {config_file}")
     return config_file
+
+
+def get_google_ads_tenants() -> List[Tuple[str, str]]:
+    """
+    Resolve the list of (config_file, manager_customer_id) tenants to run.
+
+    Resolution order:
+      1. GOOGLE_ADS_CONFIG_FILES (comma- or semicolon-separated list of paths)
+         -> one tenant per path; manager_customer_id is read from each yaml's
+         `login_customer_id`.
+      2. GOOGLE_ADS_CONFIG_FILE + GOOGLE_MANAGER_CUSTOMER_ID (legacy single
+         tenant). manager_customer_id falls back to `login_customer_id` from
+         the yaml if env var is not set.
+
+    Returns:
+        Non-empty list of (config_file, manager_customer_id) pairs.
+
+    Raises:
+        ConfigurationError: If no tenants can be resolved.
+    """
+    multi = os.getenv("GOOGLE_ADS_CONFIG_FILES")
+    if multi:
+        raw_paths = [p.strip() for p in multi.replace(";", ",").split(",") if p.strip()]
+        if not raw_paths:
+            raise ConfigurationError("GOOGLE_ADS_CONFIG_FILES is set but empty")
+        tenants: List[Tuple[str, str]] = []
+        for raw in raw_paths:
+            mcc = _read_login_customer_id(raw)
+            tenants.append((raw, mcc))
+        logger.info(f"Multi-tenant mode: {len(tenants)} tenant(s) resolved")
+        for cfg, mcc in tenants:
+            logger.info(f"  tenant MCC={mcc}  config={cfg}")
+        return tenants
+
+    # Single-tenant fallback (legacy)
+    cfg = get_google_ads_config_file()
+    mcc = os.getenv("GOOGLE_MANAGER_CUSTOMER_ID") or _read_login_customer_id(cfg)
+    logger.info(f"Single-tenant mode: MCC={mcc}  config={cfg}")
+    return [(cfg, mcc)]
+
+
+def _read_login_customer_id(config_file: str) -> str:
+    """Extract `login_customer_id` from a google-ads.yaml file."""
+    path = Path(config_file)
+    if not path.exists():
+        raise ConfigurationError(f"Google Ads config file not found: {config_file}")
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh) or {}
+    except Exception as e:
+        raise ConfigurationError(f"Failed to parse {config_file}: {e}") from e
+    mcc = data.get("login_customer_id")
+    if mcc in (None, ""):
+        raise ConfigurationError(
+            f"`login_customer_id` missing in {config_file}; cannot resolve MCC"
+        )
+    return str(mcc)
 
 
 def get_data_sink() -> Optional[object]:
@@ -209,21 +296,32 @@ def main() -> int:
         config_path = get_config_path()
         config = load_config(config_path)
 
-        # Get Google Ads credentials file
-        google_config_file = get_google_ads_config_file()
-
-        # Get environment variables
-        manager_customer_id = os.getenv("GOOGLE_MANAGER_CUSTOMER_ID", "9474097201")
+        # Resolve tenant list (one or many google-ads.yaml files)
+        tenants = get_google_ads_tenants()
         api_version = os.getenv("GOOGLE_API_VERSION", API_VERSION)
-
-        logger.info(f"Manager Customer ID: {manager_customer_id}")
         logger.info(f"API Version: {api_version}")
+        logger.info(f"Tenants to process: {len(tenants)}")
 
-        # Initialize token provider (not directly used, kept for protocol compatibility)
-        token_provider = FileBasedTokenProvider(
-            platform="google",
-            credentials_file=None  # Placeholder, not used for Google Ads
-        )
+        # Initialize token provider (not directly used by Google Ads, kept for
+        # protocol compatibility). Google Ads gets its OAuth from the
+        # google-ads.yaml file passed to the Google Ads client; this provider
+        # is only here so the GoogleAdapter constructor signature is satisfied.
+        # FileBasedTokenProvider does eager validation on init and demands
+        # legacy single-tenant env vars (GOOGLE_ADS_CONFIG_FILE etc.) which
+        # are not needed in multi-tenant mode — fall back to a minimal stub
+        # that satisfies the TokenProvider Protocol without performing any I/O.
+        try:
+            token_provider = FileBasedTokenProvider(
+                platform="google",
+                credentials_file=None,
+            )
+        except Exception as e:
+            logger.warning(
+                f"FileBasedTokenProvider unavailable for google "
+                f"(legacy single-tenant env vars missing): {e}. "
+                f"Using inert stub — Google Ads auth comes from yaml."
+            )
+            token_provider = _GoogleNoopTokenProvider()
 
         # Initialize data sink
         logger.info("Initializing data sink...")
@@ -234,41 +332,87 @@ def main() -> int:
         else:
             logger.warning("Running without data sink (data will not be persisted)")
 
-        # Initialize pipeline
-        logger.info("Initializing Google Ads pipeline...")
+        # Per-tenant accumulators
         start_time = datetime.now()
+        all_stats: Dict[str, Dict[str, int]] = {}
+        all_errors: Dict[str, str] = {}
+        per_tenant_summary: list = []
 
-        pipeline = GooglePipeline(
-            config=config,
-            token_provider=token_provider,
-            google_config_file=google_config_file,
-            manager_customer_id=manager_customer_id,
-            api_version=api_version,
-            data_sink=data_sink,
-        )
+        for tenant_idx, (google_config_file, manager_customer_id) in enumerate(tenants, 1):
+            logger.info("=" * 80)
+            logger.info(
+                f"[tenant {tenant_idx}/{len(tenants)}] MCC={manager_customer_id} "
+                f"config={google_config_file}"
+            )
+            logger.info("=" * 80)
 
-        logger.success("Pipeline initialized successfully")
+            try:
+                pipeline = GooglePipeline(
+                    config=config,
+                    token_provider=token_provider,
+                    google_config_file=google_config_file,
+                    manager_customer_id=manager_customer_id,
+                    api_version=api_version,
+                    data_sink=data_sink,
+                    # In multi-tenant runs, prevent each tenant from wiping
+                    # other tenants' rows in TRUNCATE-style tables. Order
+                    # matters: first matching column in the DF is used.
+                    scoped_replace_columns=(
+                        ["customer_id_google", "id"]
+                        if len(tenants) > 1 else None
+                    ),
+                )
+            except Exception as e:
+                logger.error(f"[tenant {manager_customer_id}] pipeline init failed: {e}")
+                all_errors[f"_tenant_{manager_customer_id}_init"] = str(e)
+                continue
 
-        # Run all tables
-        logger.info("Running pipeline for all tables...")
-        results_stats, errors = pipeline.run_all_tables(load_to_sink=(data_sink is not None))
+            try:
+                tenant_stats, tenant_errors = pipeline.run_all_tables(
+                    load_to_sink=(data_sink is not None)
+                )
+            finally:
+                pipeline.close()
+
+            # Namespace stats/errors per tenant so we don't collide across MCCs.
+            # When data_sink is None (dry-run), pipeline.run() returns stats=None;
+            # coerce to {} so the summary writer can iterate safely.
+            for tname, st in tenant_stats.items():
+                all_stats[f"{manager_customer_id}::{tname}"] = st or {}
+            for tname, msg in tenant_errors.items():
+                all_errors[f"{manager_customer_id}::{tname}"] = msg
+
+            tenant_ok = sum(1 for n in tenant_stats if n not in tenant_errors)
+            tenant_total = len(tenant_stats)
+            per_tenant_summary.append({
+                "manager_customer_id": manager_customer_id,
+                "tables_successful": tenant_ok,
+                "tables_total": tenant_total,
+                "tables_failed": len(tenant_errors),
+            })
+            logger.info(
+                f"[tenant {manager_customer_id}] done: "
+                f"{tenant_ok}/{tenant_total} tables ok"
+            )
+
         end_time = datetime.now()
 
         # Analyze results based on error tracking
-        tables_succeeded_stats = {name: stats for name, stats in results_stats.items() if name not in errors}
-        tables_failed = list(errors.keys())
-        total = len(results_stats)
+        tables_succeeded_stats = {n: s for n, s in all_stats.items() if n not in all_errors}
+        tables_failed = list(all_errors.keys())
+        total = len(all_stats)
 
         logger.info("=" * 80)
-        logger.info(f"Pipeline Execution Complete: {len(tables_succeeded_stats)}/{total} tables successful")
+        logger.info(
+            f"Pipeline Execution Complete: "
+            f"{len(tables_succeeded_stats)}/{total} (table x tenant) successful"
+        )
         logger.info("=" * 80)
-
-        # Close pipeline
-        pipeline.close()
 
         # Write execution summary
         metadata = {
-            "manager_customer_id": manager_customer_id,
+            "tenants": per_tenant_summary,
+            "tenant_count": len(tenants),
             "api_version": api_version,
             "tables_successful": len(tables_succeeded_stats),
             "tables_total": total,
@@ -276,35 +420,34 @@ def main() -> int:
         }
 
         if not tables_failed:
-            # All tables succeeded
-            logger.success("All tables processed successfully")
+            logger.success("All tables processed successfully across all tenants")
             summary_writer.write_success(
                 start_time=start_time,
                 end_time=end_time,
-                tables_stats=results_stats,
+                tables_stats=all_stats,
                 exit_code=0,
                 metadata=metadata,
             )
             return 0
         elif not tables_succeeded_stats:
-            # All tables failed with exceptions
-            logger.error("All tables failed")
+            logger.error("All tables failed across all tenants")
             summary_writer.write_failure(
                 start_time=start_time,
                 end_time=end_time,
-                error=f"All {len(tables_failed)} tables failed to process",
+                error=f"All {len(tables_failed)} (table x tenant) failed to process",
                 exit_code=3,
             )
             return 3
         else:
-            # Partial success: some tables succeeded, some failed with exceptions
-            logger.warning(f"Partial success: {len(tables_succeeded_stats)}/{total} tables completed")
+            logger.warning(
+                f"Partial success: {len(tables_succeeded_stats)}/{total} (table x tenant) completed"
+            )
             summary_writer.write_partial_success(
                 start_time=start_time,
                 end_time=end_time,
                 tables_succeeded_stats=tables_succeeded_stats,
                 tables_failed=tables_failed,
-                errors=[{"table": name, "message": errors[name]} for name in tables_failed],
+                errors=[{"table": name, "message": all_errors[name]} for name in tables_failed],
                 exit_code=3,
                 metadata=metadata,
             )

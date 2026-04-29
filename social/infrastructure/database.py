@@ -113,6 +113,7 @@ class VerticaDataSink:
         mode: str = "upsert",
         dedupe_columns: Optional[List[str]] = None,
         increment_columns: Optional[List[str]] = None,
+        replace_scope_filter: Optional[Dict[str, List[Any]]] = None,
     ) -> LoadStats:
         """Load DataFrame into Vertica table.
 
@@ -126,6 +127,11 @@ class VerticaDataSink:
                 - 'increment': INSERT new rows + INCREMENT metrics for existing rows
             dedupe_columns: Columns to use as Primary Key (None = auto-detect)
             increment_columns: Columns to increment (only for mode='increment')
+            replace_scope_filter: For mode='replace' only. When provided, the
+                table is NOT truncated; instead, rows matching the supplied
+                column->values filter are deleted before INSERT. Used for
+                multi-tenant pipelines where each tenant must replace only
+                its own slice. Ignored for any other mode.
 
         Returns:
             LoadStats with detailed statistics about rows written to database
@@ -224,8 +230,14 @@ class VerticaDataSink:
 
             # Handle different load modes
             if mode == "replace":
-                # REPLACE: Truncate + Insert all
-                self._truncate_table(cursor, final_table_name)
+                # REPLACE: Truncate + Insert all (single-tenant default).
+                # Multi-tenant: when replace_scope_filter is provided, scope
+                # the wipe to the rows matching that filter, so other tenants'
+                # rows survive.
+                if replace_scope_filter:
+                    self._delete_scope(cursor, final_table_name, replace_scope_filter)
+                else:
+                    self._truncate_table(cursor, final_table_name)
                 rows_inserted = self._copy_to_db(cursor, final_table_name, df, pk_columns=dedupe_columns)
                 logger.info(f"✓ Replaced {rows_inserted} rows in {final_table_name}")
                 return LoadStats(
@@ -978,6 +990,56 @@ class VerticaDataSink:
         cursor.execute(query)
         cursor.execute("COMMIT")
         logger.info(f"Truncated table: {table_name}")
+
+    def _delete_scope(
+        self,
+        cursor,
+        table_name: str,
+        scope_filter: Dict[str, List[Any]],
+    ) -> None:
+        """Delete rows matching a column->values filter (multi-tenant safe).
+
+        Used as scoped replacement for `_truncate_table` when only the
+        current tenant's slice should be wiped. The first column in
+        scope_filter that exists in the target table is used.
+
+        Args:
+            cursor: Database cursor
+            table_name: Target table
+            scope_filter: e.g. {"customer_id_google": ["1234567890", ...]}
+                          Only the FIRST column in this dict whose values
+                          are non-empty is applied (additional ones are
+                          ignored — kept for fallback ordering).
+        """
+        if not scope_filter:
+            return
+        col, values = next(
+            (
+                (c, [str(v) for v in vs if v is not None and str(v) != ""])
+                for c, vs in scope_filter.items()
+                if vs
+            ),
+            (None, []),
+        )
+        if not col or not values:
+            logger.warning(
+                f"_delete_scope: no usable filter for {table_name}, "
+                f"falling back to TRUNCATE to keep historic semantics"
+            )
+            self._truncate_table(cursor, table_name)
+            return
+
+        placeholders = ",".join(["%s"] * len(values))
+        query = (
+            f"DELETE FROM {self.schema}.{table_name} "
+            f"WHERE {col} IN ({placeholders})"
+        )
+        cursor.execute(query, values)
+        cursor.execute("COMMIT")
+        logger.info(
+            f"Deleted scope from {table_name}: "
+            f"{col} IN ({len(values)} values)"
+        )
 
     def _increment(
         self,

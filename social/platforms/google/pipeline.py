@@ -71,6 +71,7 @@ class GooglePipeline:
         manager_customer_id: str = "9474097201",
         api_version: str = API_VERSION,
         data_sink: Optional[DataSink] = None,
+        scoped_replace_columns: Optional[List[str]] = None,
     ):
         """
         Initialize the Google Ads pipeline.
@@ -82,6 +83,13 @@ class GooglePipeline:
             manager_customer_id: Manager account ID (MCC)
             api_version: Google Ads API version
             data_sink: Optional data sink for loading data (e.g., VerticaDBManager)
+            scoped_replace_columns: When set (e.g. ["customer_id_google", "id"]),
+                tables with `truncate: True` won't TRUNCATE the whole table at
+                load time; instead they delete only rows whose first matching
+                column is among the values present in the current DataFrame.
+                Required for multi-tenant runs to avoid one tenant wiping
+                another tenant's rows. Single-tenant default: None
+                (legacy TRUNCATE behavior preserved).
 
         Raises:
             ConfigurationError: If configuration is invalid
@@ -95,6 +103,7 @@ class GooglePipeline:
         self.manager_customer_id = manager_customer_id
         self.api_version = api_version
         self.data_sink = data_sink
+        self.scoped_replace_columns = scoped_replace_columns or []
 
         # Initialize adapter
         try:
@@ -552,6 +561,28 @@ class GooglePipeline:
                 load_mode = "append"
                 logger.debug(f"Using append mode for {table_name} (no PK specified)")
 
+            # Build replace_scope_filter for multi-tenant safe truncate.
+            # Only relevant when mode=replace and the pipeline was instructed
+            # to scope replaces (multi-tenant runs).
+            replace_scope_filter: Optional[Dict[str, List[Any]]] = None
+            if load_mode == "replace" and self.scoped_replace_columns:
+                for col in self.scoped_replace_columns:
+                    if col in df.columns:
+                        values = df[col].dropna().unique().tolist()
+                        if values:
+                            replace_scope_filter = {col: values}
+                            logger.info(
+                                f"[multi-tenant] {table_name} replace scoped to "
+                                f"{col} ({len(values)} value(s))"
+                            )
+                            break
+                if replace_scope_filter is None:
+                    logger.warning(
+                        f"[multi-tenant] {table_name} has no usable scoped column "
+                        f"in {self.scoped_replace_columns}; will fall back to TRUNCATE "
+                        f"and may overwrite other tenants. df cols={list(df.columns)}"
+                    )
+
             # Check if sink has write_dataframe method (Vertica style - legacy)
             if hasattr(self.data_sink, "write_dataframe"):
                 rows_loaded = self.data_sink.write_dataframe(
@@ -571,13 +602,26 @@ class GooglePipeline:
                 }
             # Check if sink has load method (Protocol style - preferred)
             elif hasattr(self.data_sink, "load"):
-                stats = self.data_sink.load(
+                load_kwargs: Dict[str, Any] = dict(
                     df=df,
                     table_name=table_name,
                     mode=load_mode,
                     dedupe_columns=pk_columns,
                     increment_columns=increment_columns,
                 )
+                if replace_scope_filter is not None:
+                    # Only newer sinks accept this kwarg; older sinks would
+                    # raise TypeError. Branch on capability.
+                    import inspect
+                    sig = inspect.signature(self.data_sink.load)
+                    if "replace_scope_filter" in sig.parameters:
+                        load_kwargs["replace_scope_filter"] = replace_scope_filter
+                    else:
+                        logger.warning(
+                            f"data_sink.load() does not support replace_scope_filter; "
+                            f"{table_name} will TRUNCATE (legacy sink)."
+                        )
+                stats = self.data_sink.load(**load_kwargs)
                 # LoadStats object, convert to dict
                 return stats.to_dict()
             else:

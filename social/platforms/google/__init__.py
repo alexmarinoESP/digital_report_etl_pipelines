@@ -52,10 +52,14 @@ cfg_config_google_ads_key_9474097201 = os.path.join(
 cfg_config_google_ads_key_4619434319 = os.path.join(
     os.path.dirname(__file__), "google-ads-4619434319.yml"
 )
+cfg_config_google_ads_key_7604543417 = os.path.join(
+    os.path.dirname(__file__), "google-ads-7604543417.yml"
+)
 
 cfg_config_google_ads_key_d = {
     "9474097201": cfg_config_google_ads_key_9474097201,
     "4619434319": cfg_config_google_ads_key_4619434319,
+    "7604543417": cfg_config_google_ads_key_7604543417,
 }
 
 # Legacy query dispatcher
@@ -76,6 +80,7 @@ dispatcher = {
 manager_to_company = {
     "9474097201": 1,
     "4619434319": 1,
+    "7604543417": 30,
 }
 
 # New independent implementation

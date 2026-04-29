@@ -17,8 +17,9 @@ from typing import Dict
 # ============================================================================
 
 COMPANY_ACCOUNT_MAP: Dict[str, int] = {
-    "9474097201": 1,  # Main Google Ads account
-    "4619434319": 1,  # Secondary Google Ads account
+    "9474097201": 1,   # Esprinet MCC (main)
+    "4619434319": 1,   # Esprinet MCC (secondary)
+    "7604543417": 30,  # Zeliatech S.p.A - Manager Account
 }
 
 # ============================================================================
