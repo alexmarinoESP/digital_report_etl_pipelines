@@ -107,11 +107,14 @@ linkedin_ads_campaign_audience:
     convert_string:
       columns:
       - id
+      - audience_id
     add_row_loaded_date: None  # None or params: None in old code
-  # Changed to upsert for full row updates
+  # PK is (id, audience_id): a campaign targets N audiences, so it has N rows.
+  # Upserting only on `id` would collapse them down to one row.
   upsert:
     pk_columns:
       - id
+      - audience_id
 
 linkedin_ads_account:
   q: search

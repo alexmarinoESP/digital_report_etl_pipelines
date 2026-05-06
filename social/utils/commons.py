@@ -400,74 +400,64 @@ def handle_simple_response(response: Union[dict, List]) -> pd.DataFrame:
 
 def extract_targeting_criteria(campaigns: List[Dict]) -> pd.DataFrame:
     """
-    Extract audience_id from LinkedIn campaign targetingCriteria.
+    Extract audience_id rows from LinkedIn campaign targetingCriteria.
 
-    This function parses the nested targetingCriteria structure to extract
-    audience segment IDs for campaign-audience relationships.
+    Walks the nested ``include.and[*].or`` structure and collects every URN in
+    ``urn:li:adTargetingFacet:audienceMatchingSegments`` and
+    ``urn:li:adTargetingFacet:dynamicSegments``. Emits one row per
+    (campaign_id, audience_id), so a campaign targeting N audiences yields N rows.
+    Campaigns with no audience facets contribute one row with ``audience_id=None``.
 
     Args:
-        campaigns: List of campaign dictionaries from LinkedIn API
+        campaigns: List of campaign dicts from LinkedIn API.
 
     Returns:
-        DataFrame with columns: id, audience_id
-
-    Examples:
-        Input campaign with targetingCriteria containing audience segments
-        Output: DataFrame with campaign id and extracted audience_id
+        DataFrame with columns: id, audience_id.
     """
-    audiences = [
+    audience_facets = (
         "urn:li:adTargetingFacet:audienceMatchingSegments",
         "urn:li:adTargetingFacet:dynamicSegments",
-    ]
-    segments = []
-    ids = []
+    )
+
+    rows: List[Dict[str, Any]] = []
 
     for campaign in campaigns:
+        campaign_id = campaign.get("id")
         try:
-            targeting = campaign.get("targetingCriteria", {})
-            target = targeting.get("include", {}).get("and", [])
+            targeting = campaign.get("targetingCriteria") or {}
+            and_items = (targeting.get("include") or {}).get("and") or []
+            elements = [item.get("or", {}) for item in and_items if isinstance(item, dict)]
 
-            # DEBUG: Log first campaign's targeting structure
-            if campaign == campaigns[0]:
-                logger.debug(f"First campaign targetingCriteria keys: {targeting.keys() if targeting else 'None'}")
-                logger.debug(f"First campaign include.and length: {len(target)}")
+            urns: List[str] = []
+            for elem in elements:
+                if not isinstance(elem, dict):
+                    continue
+                for facet in audience_facets:
+                    val = elem.get(facet)
+                    if not val:
+                        continue
+                    if isinstance(val, list):
+                        urns.extend(v for v in val if isinstance(v, str))
+                    elif isinstance(val, str):
+                        urns.append(val)
 
-            # Extract elements from targeting
-            # Each item in "and" has an "or" key with a dict of facets
-            elements_target = [item.get("or", {}) for item in target if isinstance(item, dict)]
+            audience_ids = []
+            for urn in urns:
+                if "urn:li:adSegment:" in urn:
+                    audience_ids.append(urn.split("urn:li:adSegment:")[1])
 
-            # Look for audience facets
-            segment = []
-            for aud_facet in audiences:
-                for elem in elements_target:
-                    # elem is a dict like {"urn:li:adTargetingFacet:dynamicSegments": ["urn:li:adSegment:123", ...]}
-                    if aud_facet in elem:
-                        val = elem.get(aud_facet)
-                        if val:
-                            # val is a list of URNs, take first one
-                            segment.append(val[0] if isinstance(val, list) else val)
+            audience_ids = list(dict.fromkeys(audience_ids))  # dedupe, keep order
 
-            segment = list(filter(None, segment))
-
-            if len(segment) > 0:
-                # Extract segment ID from URN
-                seg = segment[0]
-                if "urn:li:adSegment:" in seg:
-                    seg = seg.split("urn:li:adSegment:")[1]
-                    segments.append(seg)
-                else:
-                    segments.append(None)
-            else:
-                segments.append(None)
-
-            ids.append(campaign.get("id"))
+            for aid in audience_ids:
+                rows.append({"id": campaign_id, "audience_id": aid})
 
         except Exception as e:
-            logger.debug(f"Could not extract targeting for campaign: {e}")
-            ids.append(campaign.get("id"))
-            segments.append(None)
+            logger.debug(f"Could not extract targeting for campaign {campaign_id}: {e}")
 
-    df = pd.DataFrame({"id": ids, "audience_id": segments})
-    non_null_count = df["audience_id"].notna().sum()
-    logger.debug(f"extract_targeting_criteria: {len(df)} campaigns, {non_null_count} with audience_id")
+    df = pd.DataFrame(rows, columns=["id", "audience_id"])
+    distinct_campaigns = df["id"].nunique() if not df.empty else 0
+    logger.debug(
+        f"extract_targeting_criteria: {len(campaigns)} campaigns in input, "
+        f"{distinct_campaigns} with audience targeting, {len(df)} (id, audience_id) rows"
+    )
     return df

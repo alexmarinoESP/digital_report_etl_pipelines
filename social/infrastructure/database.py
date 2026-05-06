@@ -264,7 +264,7 @@ class VerticaDataSink:
                         rows_filtered=rows_filtered,
                     )
 
-                rows_inserted = self._copy_to_db(cursor, final_table_name, df)
+                rows_inserted = self._copy_to_db(cursor, final_table_name, df, pk_columns=dedupe_columns)
                 logger.info(f"✓ Appended {rows_inserted} new rows to {final_table_name}")
                 return LoadStats(
                     rows_from_api=rows_from_api,
@@ -670,7 +670,10 @@ class VerticaDataSink:
 
             # Step 2: Truncate source table and insert new data
             self._truncate_table(cursor, source_table)
-            rows_in_source = self._copy_to_db(cursor, source_table, df)
+            # Pass pk_columns so _copy_to_db doesn't fall back to its own
+            # auto-detection (which would collapse rows that share a single
+            # id column but differ on a composite PK like (id, audience_id)).
+            rows_in_source = self._copy_to_db(cursor, source_table, df, pk_columns=pk_columns)
             logger.debug(f"Loaded {rows_in_source} rows into {source_table}")
 
             # Step 3: Build MERGE query
@@ -687,7 +690,7 @@ class VerticaDataSink:
                 logger.warning(f"No columns to update for {table_name}, only PK columns found")
                 # If no update columns, just insert new rows
                 df_new = self._deduplicate(cursor, table_name, df, pk_columns)
-                rows_inserted = self._copy_to_db(cursor, table_name, df_new)
+                rows_inserted = self._copy_to_db(cursor, table_name, df_new, pk_columns=pk_columns)
                 return {"rows_inserted": rows_inserted, "rows_updated": 0}
 
             # Query existing keys to calculate inserted vs updated
@@ -1102,7 +1105,7 @@ class VerticaDataSink:
 
             # Step 3: INSERT new rows (with all columns)
             if not new_rows.empty:
-                rows_inserted = self._copy_to_db(cursor, table_name, new_rows)
+                rows_inserted = self._copy_to_db(cursor, table_name, new_rows, pk_columns=pk_columns)
                 logger.info(f"✓ Inserted {rows_inserted} new rows")
 
             # Step 4: INCREMENT metrics for existing rows
