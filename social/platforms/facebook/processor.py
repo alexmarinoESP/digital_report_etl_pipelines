@@ -802,3 +802,47 @@ class FacebookProcessor:
         )
 
         return self
+
+    def recalculate_ratios(self, **kwargs) -> "FacebookProcessor":
+        """Recompute ctr / cpc / cpm from the additive metrics.
+
+        Why: when summing chunks of insights (date_preset=maximum splits the
+        period into 120-day chunks), ratio columns must NOT be summed.
+        We recompute them from the already-aggregated totals so the values
+        match what Meta Business shows for the lifetime of the ad.
+
+        Formulas:
+          ctr = clicks / impressions * 100
+          cpc = spend / clicks
+          cpm = spend / impressions * 1000
+
+        No-op if the source columns are missing.
+
+        Returns:
+            Self for chaining.
+        """
+        if self.df.empty:
+            return self
+
+        df = self.df
+
+        # Coerce to numeric in case earlier processing has them as strings
+        # (covers both 'object' and pandas 2.x 'string' dtype).
+        for col in ("spend", "clicks", "impressions", "inline_link_clicks"):
+            if col in df.columns and not pd.api.types.is_numeric_dtype(df[col]):
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        if {"clicks", "impressions"}.issubset(df.columns):
+            df["ctr"] = (df["clicks"] / df["impressions"]).where(df["impressions"] > 0, 0) * 100
+        if {"spend", "clicks"}.issubset(df.columns):
+            df["cpc"] = (df["spend"] / df["clicks"]).where(df["clicks"] > 0, 0)
+        if {"spend", "impressions"}.issubset(df.columns):
+            df["cpm"] = (df["spend"] / df["impressions"]).where(df["impressions"] > 0, 0) * 1000
+        if {"inline_link_clicks", "impressions"}.issubset(df.columns):
+            df["inline_link_click_ctr"] = (
+                df["inline_link_clicks"] / df["impressions"]
+            ).where(df["impressions"] > 0, 0) * 100
+
+        self.df = df
+        logger.debug("Recalculated ctr/cpc/cpm/inline_link_click_ctr from aggregated totals")
+        return self

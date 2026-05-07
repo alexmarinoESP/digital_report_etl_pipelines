@@ -282,6 +282,15 @@ az containerapp create \
 
 ## Sviluppo
 
+### Lettura obbligatoria prima di toccare codice condiviso
+
+Se modifichi qualcosa sotto `social/utils/`, `social/infrastructure/` o
+`social/core/` — leggi prima [docs/SHARED_CODE_GUIDELINES.md](docs/SHARED_CODE_GUIDELINES.md).
+Spiega quali utility sono shared fra le piattaforme, i pattern di
+regressione cross-platform già visti (es. una fix per LinkedIn che ha
+rotto Facebook in produzione il 2026-05-07), le safety net in piedi e una
+checklist da seguire prima del push.
+
 ### Eseguire i test
 
 ```bash

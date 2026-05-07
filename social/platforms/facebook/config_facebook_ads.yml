@@ -54,10 +54,21 @@ fb_ads_insight:
       cols: ['ad_name', 'name']
     drop_columns:
       cols: ['date_stop','date_start']
-    aggregate_by_entity:  # Aggregate metrics by ad_id (remove date dimension)
-      group_columns: null  # Auto-detect (ad_id)
-      metric_columns: null
+    # Sum the additive metrics across chunks (Facebook returns multiple
+    # rows per ad_id when date_preset=maximum, one per 120-day chunk).
+    # Ratios (ctr, cpc, cpm) are intentionally NOT summed — they are
+    # recomputed below from the aggregated totals.
+    aggregate_by_entity:
+      group_columns: ['ad_id']
+      metric_columns:
+        - spend
+        - impressions
+        - reach
+        - inline_link_clicks
+        - clicks
       agg_method: 'sum'
+    recalculate_ratios:
+      params: None
     add_row_loaded_date:
       params: None
 

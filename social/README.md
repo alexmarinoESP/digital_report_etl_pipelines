@@ -9,6 +9,11 @@
 
 ---
 
+> ⚠️ **Prima di toccare codice in `social/utils/`, `social/infrastructure/` o `social/core/`**:
+> leggi [`docs/SHARED_CODE_GUIDELINES.md`](../docs/SHARED_CODE_GUIDELINES.md). Una fix
+> "innocua" per una piattaforma può rompere le altre — è già successo (incidente
+> 2026-05-07 documentato).
+
 ## 🎯 Overview
 
 Pipeline ETL enterprise per l'estrazione di dati pubblicitari da LinkedIn, Google Ads e Facebook Ads, con architettura SOLID completa e type-safe.

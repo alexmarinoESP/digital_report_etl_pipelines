@@ -75,11 +75,33 @@ def aggregate_metrics_by_entity(
     if not group_columns:
         raise ValueError("No group columns found for aggregation")
 
-    # Auto-detect metric columns
+    # Some SDKs (notably facebook-business) return numeric metrics as strings
+    # ("56.77", "14455"). Coerce candidate columns to numeric *before* either
+    # the auto-detect step OR the explicit-list path: with explicit
+    # metric_columns we still need them numeric for groupby('sum').
+    df = df.copy()
+    id_patterns = ['_id', 'id_', 'account']
+    candidate_cols = (
+        metric_columns
+        if metric_columns is not None
+        else [c for c in df.columns
+              if c not in group_columns
+              and not any(p in c.lower() for p in id_patterns)]
+    )
+    for col in candidate_cols:
+        if col not in df.columns:
+            continue
+        # Cover both legacy 'object' and modern 'string' dtypes.
+        if not pd.api.types.is_numeric_dtype(df[col]):
+            converted = pd.to_numeric(df[col], errors='coerce')
+            # Only adopt the cast if at least one value parsed as a number;
+            # otherwise the column is genuinely text (names, urls, ...).
+            if converted.notna().any():
+                df[col] = converted
+
+    # Auto-detect metric columns when the caller didn't supply them.
     if metric_columns is None:
         numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
-        # Exclude ID columns from metrics
-        id_patterns = ['_id', 'id_', 'account']
         metric_columns = [
             col for col in numeric_cols
             if col not in group_columns
@@ -104,6 +126,19 @@ def aggregate_metrics_by_entity(
         rows_before = len(df)
         df_agg = df.groupby(group_columns, as_index=False).agg(agg_dict)
         rows_after = len(df_agg)
+
+        # Replace NaN in aggregated metric columns with 0.
+        # When the API returns null/missing values (e.g. publisher_platform
+        # breakdown for an ad that didn't run on that platform), to_numeric
+        # produces NaN; sum on an all-NaN group also stays NaN. The downstream
+        # Vertica COPY then serializes NaN as INT64_MIN sentinel
+        # (-9223372036854775808), which Vertica rejects as "out of range" for
+        # BIGINT columns. 0 is the semantically correct value for a missing
+        # additive metric.
+        if agg_method == 'sum':
+            cols_to_fill = [c for c in metric_columns if c in df_agg.columns]
+            if cols_to_fill:
+                df_agg[cols_to_fill] = df_agg[cols_to_fill].fillna(0)
 
         logger.info(
             f"✓ Aggregated metrics: {rows_before} rows → {rows_after} entities\n"

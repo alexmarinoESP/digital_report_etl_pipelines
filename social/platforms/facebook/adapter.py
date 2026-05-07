@@ -527,21 +527,47 @@ class FacebookAdapter:
         date_preset: Optional[str] = None,
         fields: Optional[List[str]] = None,
         **kwargs
-    ) -> List[Dict[str, Any]]:
+    ) -> pd.DataFrame:
         """Get insights with actions for all configured ad accounts.
 
-        This is an alias for get_all_insights with actions fields included.
+        Calls ``get_insights_with_actions`` (which uses ``fields_ads_insight_actions``
+        and adds the ``actions`` field with proper ``action_breakdowns``) once per
+        account, accumulates the rows and returns a DataFrame. Previously this
+        was an alias of ``get_all_insights`` and consequently never asked for the
+        ``actions`` field, leaving ``fb_ads_insight_actions`` empty.
 
         Args:
-            date_preset: Date preset filter (e.g., "last_7d", "last_14d")
-            fields: List of fields to retrieve - optional
-            **kwargs: Additional parameters
+            date_preset: Date preset filter (e.g., "last_7d", "last_14d").
+            fields: Ignored — fields are taken from ``fields_ads_insight_actions``.
+            **kwargs: Additional parameters (ignored, kept for compatibility).
 
         Returns:
-            List of insight dictionaries with actions from all accounts
+            DataFrame with insight rows including the ``actions`` field.
         """
-        logger.info(f"Fetching insights with actions (date_preset={date_preset})")
-        return self.get_all_insights(date_preset=date_preset, fields=fields, **kwargs)
+        logger.info(
+            f"Fetching insights+actions for {len(self.ad_account_ids)} accounts "
+            f"(date_preset={date_preset})"
+        )
+
+        all_rows: List[Dict[str, Any]] = []
+        failed_accounts: List[str] = []
+
+        for account_id in self.ad_account_ids:
+            try:
+                rows = self.get_insights_with_actions(account_id, date_preset)
+                all_rows.extend(rows)
+            except APIError as e:
+                logger.error(f"Failed to fetch insights+actions for {account_id}: {e}")
+                failed_accounts.append(account_id)
+
+        if failed_accounts:
+            logger.warning(f"Failed accounts: {failed_accounts}")
+
+        logger.success(
+            f"Retrieved {len(all_rows)} total insights+actions rows "
+            f"from {len(self.ad_account_ids) - len(failed_accounts)} accounts"
+        )
+        return pd.DataFrame(all_rows)
 
     def get_all_custom_conversions(
         self,

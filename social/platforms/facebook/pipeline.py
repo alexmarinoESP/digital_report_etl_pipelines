@@ -297,10 +297,16 @@ class FacebookPipeline:
                 pk_columns = upsert_config.get("pk_columns")
                 logger.debug(f"Using upsert mode for {table_name}: PK={pk_columns}")
 
-            else:
-                # Default: APPEND (insert only new rows, skip duplicates)
+            elif "append" in table_config:
+                # APPEND with explicit PK from config
                 load_mode = "append"
-                logger.debug(f"Using append mode for {table_name}")
+                pk_columns = table_config["append"].get("pk_columns")
+                logger.debug(f"Using append mode for {table_name}: PK={pk_columns}")
+
+            else:
+                # Default: APPEND (insert only new rows, PK auto-detected)
+                load_mode = "append"
+                logger.debug(f"Using append mode for {table_name} (PK auto-detect)")
 
             # Write to sink with appropriate method
             if hasattr(self.data_sink, "load"):

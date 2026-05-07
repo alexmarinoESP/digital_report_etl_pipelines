@@ -904,6 +904,27 @@ class VerticaDataSink:
         df = df.replace({pd.NaT: None})
         df = df.where(pd.notna(df), None)
 
+        # Safety net for the pandas int64 NaN sentinel.
+        # When a numeric column ends up as int64 dtype WITH a missing value,
+        # pandas materialises that NaN as INT64_MIN (-9223372036854775808)
+        # and the COPY emits it as a literal string. Vertica BIGINT treats
+        # that exact value as its internal NULL marker and rejects it
+        # ("int8 out of range"). It can sneak in via:
+        #   - aggregate_metrics_by_entity on an int64 group with all-NaN
+        #   - to_numeric('') -> NaN, dtype upgraded back to int64 elsewhere
+        #   - a third-party platform processor we don't know about yet
+        # Replacing it with None here makes the COPY emit "None" -> NULL
+        # regardless of which platform sent the dataframe.
+        _INT64_NAN_SENTINEL = -9223372036854775808
+        for col in df.select_dtypes(include=['int64', 'Int64']).columns:
+            mask = df[col] == _INT64_NAN_SENTINEL
+            if mask.any():
+                logger.warning(
+                    f"Replaced {int(mask.sum())} INT64_MIN sentinel value(s) with NULL "
+                    f"in column '{col}' before COPY to {table_name}"
+                )
+                df[col] = df[col].astype(object).where(~mask, None)
+
         # CRITICAL: Filter NULL values in Primary Key columns
         # This replicates OLD project's behavior (connectdb.py line 301)
         # where rows with NULL in PK columns are dropped before COPY
