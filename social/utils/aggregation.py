@@ -118,8 +118,20 @@ def aggregate_metrics_by_entity(
         logger.debug(f"Dropping date columns for aggregation: {date_cols}")
         df = df.drop(columns=date_cols)
 
-    # Build aggregation dictionary
+    # Build aggregation dictionary.
+    # IMPORTANT: a vanilla df.groupby(group).agg({metric: 'sum'}) drops every
+    # column that's not in group_columns or agg_dict. For Facebook insights
+    # this loses the descriptors that came from the same row (campaign_id,
+    # adset_id, account_id, ad_name, ...) because they're not in
+    # group_columns and not metrics either. Preserve them with 'first'
+    # (descriptors are constant per entity, so 'first' is correct).
+    descriptor_columns = [
+        col for col in df.columns
+        if col not in group_columns and col not in metric_columns
+    ]
     agg_dict = {col: agg_method for col in metric_columns}
+    for col in descriptor_columns:
+        agg_dict[col] = 'first'
 
     # Group and aggregate
     try:

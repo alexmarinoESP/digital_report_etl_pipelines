@@ -277,6 +277,35 @@ quando si indaga "perdita di righe".
 
 ---
 
+### Caso 3: 2026-05-07 (pomeriggio) — descriptor columns droppate dal groupby
+
+**Sintomo**: dopo il deploy della fix sul chunking Facebook, in
+`fb_ads_insight` le righe avevano metriche corrette (`spend`,
+`impressions`, `clicks` allineate a Meta) ma **`campaign_id`, `adset_id`,
+`account_id`, `ad_name` tutti NULL**.
+
+**Causa**: `pandas.groupby(group_columns).agg(metric_dict)` mantiene solo
+le colonne presenti in `group_columns` + chiavi di `agg_dict`. Le altre
+non vengono né aggregate né preservate: vengono semplicemente *droppate*.
+Per `fb_ads_insight` con `group_columns=['ad_id']` e
+`metric_columns=['spend','impressions',...]`, le quattro descriptor
+column dell'API non rientravano in nessuna delle due liste e sparivano.
+
+**Fix**: in `aggregate_metrics_by_entity`, aggiunto un passaggio che
+identifica le colonne "descrittive" (non group, non metric, non metadata)
+e le include nell'`agg_dict` con metodo `'first'`. Le descrittive sono
+costanti per entità (un `ad_id` ha sempre stesso `campaign_id`,
+`adset_id`, `account_id`, `ad_name`), quindi `'first'` ne preserva il
+valore senza ambiguità.
+
+**Lezione**: quando si fa un `groupby` su un dataframe che ha sia
+metriche aggregabili sia descriptor di entità, **non basta dire come
+aggregare le metriche**: serve dire esplicitamente cosa fare con le
+descrittive (`'first'`, oppure aggiungerle al `groupby`). Pandas non
+ha un comportamento "tieni così com'è" implicito.
+
+---
+
 ## Quando aggiornare questo documento
 
 - Hai fixato un bug cross-platform o introdotto una nuova safety net →
