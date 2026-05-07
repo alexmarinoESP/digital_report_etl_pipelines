@@ -157,6 +157,50 @@ cpm = spend / impressions * 1000
 Per Facebook esiste già `FacebookProcessor.recalculate_ratios`. Se aggiungi
 una nuova platform che chunka, replica il pattern.
 
+### 6b. Rate limiting Meta — best practice
+
+Meta espone tre meccanismi di rate limit per la Marketing API:
+
+| livello | header | quando esplode |
+|---|---|---|
+| App-level | `X-Business-Use-Case-Usage`, code 4 / subcode 1504022 | troppe chiamate per app in finestra mobile (`Application request limit reached`) |
+| Account-level | stesso header con `acc_id_util_pct` | quando un singolo ad-account viene martellato |
+| Insights tier | `X-FB-Ads-Insights-Throttle` | il job insights ha un budget separato |
+
+In ordine crescente di robustezza, le tre strategie raccomandate da Meta:
+
+1. **Async Reports** (`POST /<ACCOUNT_ID>/insights?async=true`) — il pattern
+   ufficiale Meta per ETL: crei un report job, fai polling sullo status,
+   scarichi il risultato. Bypassa quasi del tutto il rate limit sync.
+   Più lavoro di migrazione ma è quello che Meta consiglia per workload
+   "lifetime su molti account". TODO long-term.
+2. **Throttle-aware**: leggi `X-FB-Ads-Insights-Throttle` ad ogni risposta,
+   se uno dei tre util_pct supera 80% pausa preventiva. Più reattivo del
+   pattern "aspetta che esploda".
+3. **Deferred retry queue** (cosa che facciamo oggi): quando un chunk
+   esaurisce i retry inline, **non scartarlo**. Lo metti in coda, finisci
+   gli altri chunk dell'account, poi al termine fai uno o più passaggi
+   con backoff lungo (es. 5 min, 10 min) per recuperarlo. La quota
+   tipicamente si refilla in qualche minuto, quindi la maggior parte dei
+   chunk parcheggiati passa al secondo giro.
+
+Implementazione attuale (Facebook, [http_client.py](../social/platforms/facebook/http_client.py)):
+- 3 retry inline con backoff `15s → 30s → 60s` (max 105s di attesa per chunk).
+- Se non basta, chunk in **deferred queue**.
+- Dopo aver finito tutti i chunk dell'account, partono 3 pass differiti con
+  attese `30s → 60s → 120s`.
+- Solo dopo i 4 tentativi totali (1 inline + 3 deferred) il chunk è
+  definitivamente perso e il dato verrà recuperato dal run schedulato successivo.
+- Tempo totale di attesa per un chunk irrecuperabile: ~5-6 min (105s + 30s
+  + 60s + 120s di pause più i timeout delle chiamate). Tenuto basso di
+  proposito perché la quota Meta refilla in sliding window, non a blocchi.
+  Se i log dicessero che la maggior parte dei chunk si recupera solo
+  all'ultimo pass, alzare le costanti `DEFERRED_RETRY_*` in `constants.py`.
+
+Fattore aggravante in passato: **lanciare run multipli ravvicinati** sullo
+stesso job consuma ulteriormente la quota app. Quando si fa un test
+manuale dopo il run schedulato, partire dopo ≥1h di attesa.
+
 ### 7. Anti-fraud Meta su user-token da nuovi IP
 
 In locale, l'`access_token` user-bound nel `.env` può rispondere

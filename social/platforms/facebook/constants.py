@@ -157,8 +157,18 @@ except ImportError:
 
 # Rate limiting configuration
 RATE_LIMIT_DELAY_SECONDS = 15  # Delay between API calls to avoid rate limits
-MAX_RETRIES = 3  # Maximum number of retries for failed requests
-BACKOFF_FACTOR = 2  # Exponential backoff factor (15s, 30s, 60s)
+MAX_RETRIES = 3  # Inline retries for a single chunk before parking it
+BACKOFF_FACTOR = 2  # Inline exponential backoff (15s, 30s, 60s)
+
+# Deferred retry queue: chunks that exhaust the inline retries are NOT
+# discarded. They go into a queue and we make extra passes after the first
+# pass has finished, with progressively longer waits.
+# Meta's quota refills on a sliding window so short waits often work; we
+# keep the totals tight (30s, 60s, 120s) so we don't sit idle if the
+# rate limit is actually blocking us.
+DEFERRED_RETRY_PASSES = 3          # How many extra passes after the first
+DEFERRED_RETRY_INITIAL_WAIT = 30   # 30s before the first deferred pass
+DEFERRED_RETRY_BACKOFF_FACTOR = 2  # so passes wait 30s, 60s, 120s
 
 # Date chunking configuration
 # Facebook API has data size limits, so large date ranges need chunking

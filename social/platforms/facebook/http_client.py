@@ -30,6 +30,9 @@ from social.platforms.facebook.constants import (
     API_VERSION,
     BACKOFF_FACTOR,
     DATE_CHUNK_DAYS,
+    DEFERRED_RETRY_BACKOFF_FACTOR,
+    DEFERRED_RETRY_INITIAL_WAIT,
+    DEFERRED_RETRY_PASSES,
     MAX_RETRIES,
     RATE_LIMIT_DELAY_SECONDS,
 )
@@ -333,54 +336,116 @@ class FacebookHTTPClient:
         )
 
         chunks = self._generate_date_chunks(start_date, end_date, chunk_days)
-        all_insights = []
+        all_insights: List[Dict[str, Any]] = []
+        deferred_queue: List[Dict[str, str]] = []  # chunks that ran out of inline retries
 
+        # Pass 1: try every chunk with the standard inline retry
         for idx, chunk in enumerate(chunks):
             logger.info(f"Requesting chunk {idx + 1}/{len(chunks)}: {chunk['since']} to {chunk['until']}")
+            ok, rows = self._fetch_chunk_with_retry(account_id, fields, chunk, params)
+            if ok:
+                all_insights.extend(rows)
+                logger.info(f"Chunk received with {len(rows)} records")
+                if idx < len(chunks) - 1:
+                    logger.debug(f"Waiting {RATE_LIMIT_DELAY_SECONDS}s before next chunk...")
+                    time.sleep(RATE_LIMIT_DELAY_SECONDS)
+            else:
+                # Don't lose the chunk: park it for a deferred pass.
+                deferred_queue.append(chunk)
+                logger.warning(
+                    f"Chunk {chunk['since']}-{chunk['until']} parked in deferred queue "
+                    f"({len(deferred_queue)} pending)"
+                )
 
-            # Build parameters for this chunk
-            chunk_params = params.copy() if params else {}
-            chunk_params["time_range"] = chunk
-            chunk_params.setdefault("level", "ad")
-            chunk_params.setdefault("action_attribution_windows", ["7d_click", "1d_view"])
+        # Pass 2..N: deferred retries for parked chunks. Each pass waits longer.
+        # Idea: by the time we get here the per-app/account quota has had a
+        # chance to refill, and a long wait is way cheaper than losing data.
+        for pass_idx in range(DEFERRED_RETRY_PASSES):
+            if not deferred_queue:
+                break
+            wait = DEFERRED_RETRY_INITIAL_WAIT * (DEFERRED_RETRY_BACKOFF_FACTOR ** pass_idx)
+            logger.warning(
+                f"Deferred retry pass {pass_idx + 1}/{DEFERRED_RETRY_PASSES}: "
+                f"{len(deferred_queue)} chunk(s) to retry. Waiting {wait}s for quota to refill..."
+            )
+            time.sleep(wait)
 
-            # Retry logic for rate-limited chunks
-            retry_count = 0
-            chunk_success = False
+            still_failing: List[Dict[str, str]] = []
+            for chunk in deferred_queue:
+                logger.info(f"Deferred retry of chunk {chunk['since']}-{chunk['until']}")
+                ok, rows = self._fetch_chunk_with_retry(account_id, fields, chunk, params)
+                if ok:
+                    all_insights.extend(rows)
+                    logger.success(
+                        f"✓ Deferred retry recovered chunk {chunk['since']}-{chunk['until']} "
+                        f"({len(rows)} records)"
+                    )
+                else:
+                    still_failing.append(chunk)
+                # Small pause between calls of the deferred pass too
+                time.sleep(RATE_LIMIT_DELAY_SECONDS)
+            deferred_queue = still_failing
 
-            while retry_count < MAX_RETRIES and not chunk_success:
-                try:
-                    insights = self.get_insights(account_id, fields, chunk_params)
-                    all_insights.extend(insights)
-                    logger.info(f"Chunk received with {len(insights)} records")
-                    chunk_success = True
+        if deferred_queue:
+            # Truly unrecoverable in this run. Log loudly so monitoring sees it.
+            ranges = ", ".join(f"{c['since']}..{c['until']}" for c in deferred_queue)
+            logger.error(
+                f"Definitely failed {len(deferred_queue)} chunk(s) for account {account_id} "
+                f"after {DEFERRED_RETRY_PASSES + 1} pass(es): {ranges}. "
+                f"Data will be picked up by the next scheduled run."
+            )
 
-                    # Add rate limit delay between chunks (not after the last one)
-                    if idx < len(chunks) - 1:
-                        logger.debug(f"Waiting {RATE_LIMIT_DELAY_SECONDS}s before next chunk...")
-                        time.sleep(RATE_LIMIT_DELAY_SECONDS)
-
-                except APIError as e:
-                    retry_count += 1
-
-                    # Check if it's a transient rate limit error
-                    error_msg = str(e)
-                    is_rate_limit = "rate limit" in error_msg.lower() or "too many" in error_msg.lower() or "error_subcode" in error_msg.lower()
-
-                    if is_rate_limit and retry_count < MAX_RETRIES:
-                        # Exponential backoff: 10s, 20s, 40s
-                        backoff_delay = RATE_LIMIT_DELAY_SECONDS * (BACKOFF_FACTOR ** (retry_count - 1))
-                        logger.warning(
-                            f"Rate limit hit for chunk {chunk['since']}-{chunk['until']}. "
-                            f"Retry {retry_count}/{MAX_RETRIES} after {backoff_delay}s backoff..."
-                        )
-                        time.sleep(backoff_delay)
-                    else:
-                        logger.error(f"Failed to fetch chunk {chunk['since']}-{chunk['until']} after {retry_count} retries: {e}")
-                        break  # Exit retry loop, continue to next chunk
-
-        logger.success(f"Retrieved {len(all_insights)} total insight records from {len(chunks)} chunks")
+        logger.success(
+            f"Retrieved {len(all_insights)} total insight records "
+            f"from {len(chunks) - len(deferred_queue)}/{len(chunks)} chunks"
+        )
         return all_insights
+
+    def _fetch_chunk_with_retry(
+        self,
+        account_id: str,
+        fields: List[str],
+        chunk: Dict[str, str],
+        base_params: Optional[Dict[str, Any]],
+    ) -> tuple[bool, List[Dict[str, Any]]]:
+        """Fetch one date chunk with inline rate-limit retries.
+
+        Returns (success, records). When success=False, records is empty
+        and the caller should park the chunk for a deferred retry.
+        """
+        chunk_params = base_params.copy() if base_params else {}
+        chunk_params["time_range"] = chunk
+        chunk_params.setdefault("level", "ad")
+        chunk_params.setdefault("action_attribution_windows", ["7d_click", "1d_view"])
+
+        for retry_count in range(MAX_RETRIES):
+            try:
+                rows = self.get_insights(account_id, fields, chunk_params)
+                return True, rows
+            except APIError as e:
+                error_msg = str(e)
+                is_rate_limit = (
+                    "rate limit" in error_msg.lower()
+                    or "too many" in error_msg.lower()
+                    or "error_subcode" in error_msg.lower()
+                    or "request limit reached" in error_msg.lower()
+                )
+                # Final attempt or non-transient error: bail out.
+                if retry_count + 1 >= MAX_RETRIES or not is_rate_limit:
+                    logger.warning(
+                        f"Inline retries exhausted for chunk {chunk['since']}-{chunk['until']} "
+                        f"(retry {retry_count + 1}/{MAX_RETRIES}, rate_limit={is_rate_limit})"
+                    )
+                    return False, []
+                # Backoff and retry inline.
+                backoff_delay = RATE_LIMIT_DELAY_SECONDS * (BACKOFF_FACTOR ** retry_count)
+                logger.warning(
+                    f"Rate limit hit for chunk {chunk['since']}-{chunk['until']}. "
+                    f"Inline retry {retry_count + 1}/{MAX_RETRIES} after {backoff_delay}s..."
+                )
+                time.sleep(backoff_delay)
+
+        return False, []
 
     def get_custom_conversions(
         self,
