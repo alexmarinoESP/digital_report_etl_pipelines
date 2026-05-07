@@ -94,10 +94,9 @@ google_ads_audience:
     - id
     - display_name
   truncate: true
-  append:
-    pk_columns:
-    - id
-    - placement
+  dedupe_columns:
+  - id
+  - display_name
 google_ads_cost_by_device:
   queryget:
   - query_by_device
@@ -112,10 +111,9 @@ google_ads_cost_by_device:
     - ad_id
     - device
   truncate: true
-  append:
-    pk_columns:
-    - id
-    - placement
+  dedupe_columns:
+  - ad_id
+  - device
 google_ads_account:
   queryget: []
   request: []

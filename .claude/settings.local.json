@@ -73,7 +73,12 @@
       "Bash(.venv/Scripts/python.exe _tmp_audience_for_activity.py)",
       "Bash(.venv/Scripts/python.exe _tmp_validate_fix.py)",
       "Bash(.venv/Scripts/python.exe -m dotenv --help)",
-      "Bash(.venv/Scripts/python.exe _tmp_verify_test.py)"
+      "Bash(.venv/Scripts/python.exe _tmp_verify_test.py)",
+      "Bash(.venv/Scripts/python.exe _tmp_google_audience.py)",
+      "Bash(.venv/Scripts/python.exe -c \"import yaml; c = yaml.safe_load\\(open\\('social/platforms/google/googleads_config.yml','r'\\)\\); print\\('audience.dedupe_columns =', c['google_ads_audience'].get\\('dedupe_columns'\\)\\); print\\('audience.append =', c['google_ads_audience'].get\\('append'\\)\\); print\\('cost_by_device.dedupe_columns =', c['google_ads_cost_by_device'].get\\('dedupe_columns'\\)\\); print\\('placement.dedupe_columns =', c['google_ads_placement'].get\\('dedupe_columns'\\)\\)\")",
+      "Bash(.venv/Scripts/python.exe social/platforms/google/test_audience_db.py)",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(.venv/Scripts/python.exe _tmp_google_check.py)"
     ],
     "deny": [],
     "ask": []
