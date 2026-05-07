@@ -523,7 +523,14 @@ def main() -> int:
             )
             return 3
         else:
-            # Partial success: some tables succeeded, some failed with exceptions
+            # Partial success: some tables succeeded, some failed with exceptions.
+            # Causes are typically transient (Meta rate limit, single chunk
+            # timeout, ...). The summary on blob keeps exit_code=3 so monitoring
+            # / alerting still see the partial state, but the *process* exits
+            # with 0 so Container App does NOT auto-retry the whole job:
+            # retrying would re-trigger the same rate limit and cost a full
+            # 30-min re-run that overwrites already-loaded tables. The next
+            # scheduled run will pick up the missing tables naturally.
             logger.warning(f"Partial success: {len(tables_succeeded_stats)}/{len(results_stats)} tables succeeded")
             summary_writer.write_partial_success(
                 start_time=pipeline_result["start_time"],
@@ -534,7 +541,7 @@ def main() -> int:
                 exit_code=3,
                 metadata=pipeline_result["metadata"],
             )
-            return 3
+            return 0
 
     except ConfigurationError as e:
         logger.error(f"Configuration error: {e}")

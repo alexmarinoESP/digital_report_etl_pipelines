@@ -439,6 +439,9 @@ def main() -> int:
             )
             return 3
         else:
+            # Partial success: see run_facebook.py for the rationale.
+            # Summary keeps exit_code=3 for monitoring; process exits 0 so
+            # Container App does not auto-retry on transient failures.
             logger.warning(
                 f"Partial success: {len(tables_succeeded_stats)}/{total} (table x tenant) completed"
             )
@@ -451,7 +454,7 @@ def main() -> int:
                 exit_code=3,
                 metadata=metadata,
             )
-            return 3
+            return 0
 
     except ConfigurationError as e:
         logger.error(f"Configuration error: {str(e)}")

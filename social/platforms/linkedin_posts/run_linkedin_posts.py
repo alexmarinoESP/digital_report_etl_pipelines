@@ -226,7 +226,9 @@ def main() -> int:
             )
             return 3
         else:
-            # Partial success: some tables succeeded, some failed with exceptions
+            # Partial success: see run_facebook.py for the rationale.
+            # Summary keeps exit_code=3 for monitoring; process exits 0 so
+            # Container App does not auto-retry on transient failures.
             logger.warning(f"Partial success: {len(tables_succeeded_stats)}/{len(results_stats)} tables succeeded")
             summary_writer.write_partial_success(
                 start_time=pipeline_result["start_time"],
@@ -237,7 +239,7 @@ def main() -> int:
                 exit_code=3,
                 metadata=pipeline_result["metadata"],
             )
-            return 3
+            return 0
 
     except Exception as e:
         logger.error(f"Pipeline failed: {e}")
