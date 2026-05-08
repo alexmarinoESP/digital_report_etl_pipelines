@@ -17,8 +17,9 @@ Architecture:
 - Protocol-based dependency injection
 """
 
+import time
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
 from loguru import logger
@@ -27,10 +28,32 @@ from social.core.exceptions import APIError, ConfigurationError
 from social.core.protocols import DataSink, TokenProvider
 from social.platforms.facebook.constants import (
     DEFAULT_DATE_PRESET,
+    DEFERRED_RETRY_BACKOFF_FACTOR,
+    DEFERRED_RETRY_INITIAL_WAIT,
+    DEFERRED_RETRY_PASSES,
     FIELD_DEFINITIONS,
     MAX_DATE_RANGE_DAYS,
+    RATE_LIMIT_DELAY_SECONDS,
 )
 from social.platforms.facebook.http_client import FacebookHTTPClient
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    """Heuristic: does this error look like a transient rate-limit?
+
+    We catch on the message because the SDK doesn't expose error_subcode
+    in a stable place. Errors that match are eligible for deferred retry;
+    everything else is propagated immediately.
+    """
+    s = str(exc).lower()
+    return (
+        "rate limit" in s
+        or "too many" in s
+        or "request limit reached" in s
+        or "error_subcode" in s
+        or "1504022" in s        # Application request limit reached
+        or "is_transient" in s   # Meta marks transient failures explicitly
+    )
 
 
 class FacebookAdapter:
@@ -472,6 +495,100 @@ class FacebookAdapter:
         # Convert to DataFrame
         return pd.DataFrame(all_ad_sets)
 
+    def _fetch_per_account_with_deferred_retry(
+        self,
+        fetch_fn: Callable[[str], List[Dict[str, Any]]],
+        op_label: str,
+    ) -> Tuple[List[Dict[str, Any]], List[str]]:
+        """Iterate self.ad_account_ids calling fetch_fn(account_id), parking
+        rate-limited accounts in a deferred queue and retrying them later.
+
+        Pattern (mirrors http_client.get_insights_chunked):
+          1. Pass 1: try every account once; rate-limit failures go to a queue.
+          2. Pass 2..N: wait for the quota to refill (30s, 60s, 120s) and
+             retry only the parked accounts.
+          3. Anything still failing after N+1 passes is logged as ``ERROR``
+             and propagated as "definitively failed" to the caller (which
+             may then mark the table as partial in the run summary).
+
+        Non-rate-limit errors propagate up immediately — only transient
+        rate-limit hits are eligible for deferred retry.
+
+        Args:
+            fetch_fn: callable that takes an ad_account_id (with "act_"
+                prefix) and returns a list of dicts.
+            op_label: short tag for the log lines (e.g. "insights",
+                "insights_with_actions"); helps when scanning logs.
+
+        Returns:
+            (all_rows, failed_accounts) — failed_accounts is the list of
+            account ids that didn't recover even after all deferred passes.
+        """
+        all_rows: List[Dict[str, Any]] = []
+        deferred: List[str] = []
+        failed: List[str] = []
+
+        # Pass 1: try every account
+        for account_id in self.ad_account_ids:
+            try:
+                rows = fetch_fn(account_id)
+                all_rows.extend(rows)
+            except APIError as e:
+                if _is_rate_limit_error(e):
+                    deferred.append(account_id)
+                    logger.warning(
+                        f"[{op_label}] account {account_id} parked in deferred queue "
+                        f"(rate limit, {len(deferred)} pending)"
+                    )
+                else:
+                    logger.error(f"[{op_label}] account {account_id} non-transient failure: {e}")
+                    failed.append(account_id)
+
+        # Pass 2..N: deferred retries with progressively longer waits.
+        # Same constants we use for chunked retries (30s, 60s, 120s).
+        for pass_idx in range(DEFERRED_RETRY_PASSES):
+            if not deferred:
+                break
+            wait = DEFERRED_RETRY_INITIAL_WAIT * (DEFERRED_RETRY_BACKOFF_FACTOR ** pass_idx)
+            logger.warning(
+                f"[{op_label}] deferred pass {pass_idx + 1}/{DEFERRED_RETRY_PASSES}: "
+                f"{len(deferred)} account(s) to retry. Waiting {wait}s..."
+            )
+            time.sleep(wait)
+
+            still_pending: List[str] = []
+            for account_id in deferred:
+                try:
+                    rows = fetch_fn(account_id)
+                    all_rows.extend(rows)
+                    logger.success(
+                        f"[{op_label}] deferred retry recovered account {account_id} "
+                        f"({len(rows)} rows)"
+                    )
+                except APIError as e:
+                    if _is_rate_limit_error(e):
+                        still_pending.append(account_id)
+                    else:
+                        logger.error(
+                            f"[{op_label}] account {account_id} hit a non-transient "
+                            f"error during deferred retry, giving up: {e}"
+                        )
+                        failed.append(account_id)
+                # tiny pause between accounts even in deferred passes
+                time.sleep(RATE_LIMIT_DELAY_SECONDS)
+            deferred = still_pending
+
+        # Whatever is still in deferred after all passes is unrecoverable now.
+        if deferred:
+            logger.error(
+                f"[{op_label}] {len(deferred)} account(s) still rate-limited after "
+                f"{DEFERRED_RETRY_PASSES + 1} pass(es): {deferred}. "
+                f"Their data will be picked up by the next scheduled run."
+            )
+            failed.extend(deferred)
+
+        return all_rows, failed
+
     def get_all_insights(
         self,
         date_range: Optional[str] = None,
@@ -480,46 +597,43 @@ class FacebookAdapter:
         breakdowns: Optional[List[str]] = None,
         fields: Optional[List[str]] = None,
         **kwargs
-    ) -> List[Dict[str, Any]]:
+    ) -> pd.DataFrame:
         """Get insights for all configured ad accounts.
+
+        Per-account rate-limit failures are parked in a deferred queue and
+        retried with longer waits — see ``_fetch_per_account_with_deferred_retry``.
 
         Args:
             date_range: Date preset (e.g., "last_7d", "maximum")
             date_preset: Alternative param name for date_range (compatibility)
             level: Aggregation level
-            breakdowns: Optional list of breakdown dimensions (e.g., ["age", "gender"])
-            fields: List of fields to retrieve - optional
+            breakdowns: Optional list of breakdown dimensions
+            fields: Ignored (taken from FIELD_DEFINITIONS by adapter.get_insights)
             **kwargs: Additional parameters (ignored for compatibility)
 
         Returns:
-            List of insight dictionaries from all accounts
-
-        Raises:
-            APIError: If any account fails
+            DataFrame with insight rows from all accessible accounts.
         """
-        # Support both date_range and date_preset parameter names
         effective_date = date_preset or date_range
+        logger.info(
+            f"Fetching insights for {len(self.ad_account_ids)} accounts "
+            f"(date_preset={effective_date}, breakdowns={breakdowns})"
+        )
 
-        logger.info(f"Fetching insights for {len(self.ad_account_ids)} accounts (date_preset={effective_date}, breakdowns={breakdowns})")
+        def _fetch(account_id: str) -> List[Dict[str, Any]]:
+            return self.get_insights(account_id, effective_date, level, breakdowns=breakdowns)
 
-        all_insights = []
-        failed_accounts = []
+        all_insights, failed = self._fetch_per_account_with_deferred_retry(
+            _fetch, op_label=f"insights[{breakdowns or 'no-breakdown'}]"
+        )
 
-        for account_id in self.ad_account_ids:
-            try:
-                insights = self.get_insights(account_id, effective_date, level, breakdowns=breakdowns)
-                all_insights.extend(insights)
-            except APIError as e:
-                logger.error(f"Failed to fetch insights for account {account_id}: {e}")
-                failed_accounts.append(account_id)
-                continue
+        if failed:
+            logger.warning(f"Failed accounts (definitive): {failed}")
 
-        if failed_accounts:
-            logger.warning(f"Failed accounts: {failed_accounts}")
-
-        logger.success(f"Retrieved {len(all_insights)} total insights from {len(self.ad_account_ids) - len(failed_accounts)} accounts")
-
-        # Convert to DataFrame
+        ok_count = len(self.ad_account_ids) - len(failed)
+        logger.success(
+            f"Retrieved {len(all_insights)} total insights from {ok_count} accounts"
+        )
         return pd.DataFrame(all_insights)
 
     def get_all_insights_with_actions(
@@ -549,23 +663,19 @@ class FacebookAdapter:
             f"(date_preset={date_preset})"
         )
 
-        all_rows: List[Dict[str, Any]] = []
-        failed_accounts: List[str] = []
+        def _fetch(account_id: str) -> List[Dict[str, Any]]:
+            return self.get_insights_with_actions(account_id, date_preset)
 
-        for account_id in self.ad_account_ids:
-            try:
-                rows = self.get_insights_with_actions(account_id, date_preset)
-                all_rows.extend(rows)
-            except APIError as e:
-                logger.error(f"Failed to fetch insights+actions for {account_id}: {e}")
-                failed_accounts.append(account_id)
+        all_rows, failed = self._fetch_per_account_with_deferred_retry(
+            _fetch, op_label="insights_with_actions"
+        )
 
-        if failed_accounts:
-            logger.warning(f"Failed accounts: {failed_accounts}")
+        if failed:
+            logger.warning(f"Failed accounts (definitive): {failed}")
 
+        ok_count = len(self.ad_account_ids) - len(failed)
         logger.success(
-            f"Retrieved {len(all_rows)} total insights+actions rows "
-            f"from {len(self.ad_account_ids) - len(failed_accounts)} accounts"
+            f"Retrieved {len(all_rows)} total insights+actions rows from {ok_count} accounts"
         )
         return pd.DataFrame(all_rows)
 

@@ -400,6 +400,23 @@ class MicrosoftAdsPipeline:
             # Determine load mode
             load_mode = table_config.additional_params.get("load_mode", "replace")
 
+            # Determine PK columns. For upsert/append we MUST pass them
+            # explicitly: the sink's auto-detect for Microsoft falls back to
+            # "all columns including IngestionTimestamp", which makes every
+            # run look like a brand-new row and breaks the upsert semantics.
+            # Conventional shape:
+            #   upsert:
+            #     pk_columns: [...]
+            # or the legacy `pk_columns: [...]` at table top level.
+            pk_columns = None
+            for block_name in ("upsert", "append", "increment"):
+                block = table_config.additional_params.get(block_name)
+                if isinstance(block, dict) and block.get("pk_columns"):
+                    pk_columns = block["pk_columns"]
+                    break
+            if pk_columns is None:
+                pk_columns = table_config.additional_params.get("pk_columns")
+
             # Check if sink has write_dataframe method (Vertica style - legacy)
             if hasattr(self.data_sink, "write_dataframe"):
                 rows_loaded = self.data_sink.write_dataframe(
@@ -419,10 +436,13 @@ class MicrosoftAdsPipeline:
                 }
             # Check if sink has load method (Protocol style - preferred)
             elif hasattr(self.data_sink, "load"):
+                if pk_columns:
+                    logger.debug(f"Using {load_mode} mode for {table_name}: PK={pk_columns}")
                 stats = self.data_sink.load(
                     df=df,
                     table_name=table_name,
                     mode=load_mode,
+                    dedupe_columns=pk_columns,
                 )
                 # LoadStats object, convert to dict
                 return stats.to_dict()

@@ -111,7 +111,17 @@
       "PowerShell(\"=== Ultimi log della 1a replica \\(9rm8w\\) prima della morte ===\")",
       "PowerShell($query = \"ContainerAppConsoleLogs_CL | where ContainerGroupName_s == 'caj-social-facebook-prod-sdc-c1a8g8h-9rm8w' | order by TimeGenerated desc | project TimeGenerated, Log_s | take 25\")",
       "PowerShell(\"=== Eventi sistema \\(OOMKilled, signal, exit\\) attorno alle 10:08 ===\")",
-      "PowerShell($query2 = \"ContainerAppSystemLogs_CL | where ContainerAppName_s == 'caj-social-facebook-prod-sdc' | where TimeGenerated between \\(datetime\\(2026-05-07T10:00:00Z\\)..datetime\\(2026-05-07T10:15:00Z\\)\\) | order by TimeGenerated asc | project TimeGenerated, Log_s, EventSource_s, Type_s | take 20\")"
+      "PowerShell($query2 = \"ContainerAppSystemLogs_CL | where ContainerAppName_s == 'caj-social-facebook-prod-sdc' | where TimeGenerated between \\(datetime\\(2026-05-07T10:00:00Z\\)..datetime\\(2026-05-07T10:15:00Z\\)\\) | order by TimeGenerated asc | project TimeGenerated, Log_s, EventSource_s, Type_s | take 20\")",
+      "PowerShell(\"=== Ultime esecuzioni ===\")",
+      "PowerShell(\"=== Image dei run recenti ===\")",
+      "PowerShell($query = \"ContainerAppConsoleLogs_CL | where ContainerJobName_s == 'caj-social-facebook-prod-sdc' | where TimeGenerated > ago\\(2h\\) | summarize image = any\\(ContainerImage_s\\), first_log = min\\(TimeGenerated\\), last_log = max\\(TimeGenerated\\) by ContainerGroupName_s | order by first_log desc | take 5\")",
+      "Bash(.venv/Scripts/python.exe _tmp_audit_3plat.py)",
+      "PowerShell(az containerapp job list --resource-group rg-digitalreport-etl-prod-sdc --query \"[?contains\\(name,'social'\\)].{name:name, trigger:properties.configuration.triggerType, cron:properties.configuration.scheduleTriggerConfig.cronExpression}\" -o table 2>$null)",
+      "PowerShell(\"=== Lista dei container app job nel resource group ===\")",
+      "Bash(.venv/Scripts/python.exe _tmp_4plat_db.py)",
+      "Bash(.venv/Scripts/python.exe _tmp_deep.py)",
+      "PowerShell(\"=== Storia rate limit + deferred retry per il run di stanotte ===\")",
+      "PowerShell($query = \"ContainerAppConsoleLogs_CL | where ContainerGroupName_s startswith 'caj-social-facebook-prod-sdc-29636760' | where Log_s contains 'Rate limit hit' or Log_s contains 'parked in deferred' or Log_s contains 'Deferred retry' or Log_s contains 'Definitely failed' or Log_s contains 'Application request limit' or Log_s contains 'Failed to fetch chunk' or Log_s contains 'Inline retries exhausted' or Log_s contains 'Retrieved' and Log_s contains 'total insight records' or Log_s contains 'Deferred retry recovered' | order by TimeGenerated asc | project TimeGenerated, Log_s | take 60\")"
     ],
     "deny": [],
     "ask": []

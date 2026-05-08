@@ -57,7 +57,17 @@ microsoft_ads_data:
 
   # Database configuration
   schema: "GoogleAnalytics"
-  load_mode: "replace"  # replace the table each time
+  # UPSERT (was "replace"): "replace" wiped the whole table every night, so
+  # ads older than the last 6 months were lost. With UPSERT on the natural
+  # key we keep historical rows and refresh metrics for ads still inside
+  # the LastSixMonths window. New ads are inserted, old ads are preserved
+  # with their last-known metrics.
+  load_mode: "upsert"
+  upsert:
+    pk_columns:
+      - AdId
+      - CampaignId
+      - AccountId
 
   # Query configuration (for identifying records)
   query:
