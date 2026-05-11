@@ -693,12 +693,33 @@ class VerticaDataSink:
                 rows_inserted = self._copy_to_db(cursor, table_name, df_new, pk_columns=pk_columns)
                 return {"rows_inserted": rows_inserted, "rows_updated": 0}
 
-            # Query existing keys to calculate inserted vs updated
+            # Query existing keys to calculate inserted vs updated.
+            # Both _query_existing_keys and the df merge_key below cast all
+            # PK values to str on purpose: pandas often has the PK as int64
+            # (e.g. campaign_id 12345) while Vertica stores it as varchar
+            # ('12345'). Without the cast, the set membership check below
+            # always returns False, the loader logs "N new + 0 updated" for
+            # every run even when the rows already exist in target. The
+            # MERGE on Vertica side still works correctly because it does
+            # its own native compare, so this is purely a metrics fix.
             existing_keys = self._query_existing_keys(cursor, table_name, df, pk_columns)
 
             # Count new vs existing rows
             df_copy = df.copy()
-            df_copy['_merge_key'] = df_copy[pk_columns].apply(lambda row: tuple(row), axis=1)
+
+            def _to_str_key(value):
+                # mirror the normalization done in _query_existing_keys so
+                # the two sides of the comparison are guaranteed comparable.
+                if pd.isna(value):
+                    return None
+                return str(value)
+
+            if len(pk_columns) == 1:
+                df_copy['_merge_key'] = df_copy[pk_columns[0]].map(_to_str_key)
+            else:
+                df_copy['_merge_key'] = df_copy[pk_columns].apply(
+                    lambda row: tuple(_to_str_key(v) for v in row), axis=1
+                )
             df_copy['_is_new'] = ~df_copy['_merge_key'].isin(existing_keys)
 
             rows_to_insert = df_copy['_is_new'].sum()
@@ -1185,13 +1206,19 @@ class VerticaDataSink:
             cursor.execute(query)
             existing_data = cursor.fetchall()
 
-            # Convert to set of tuples for fast lookup
+            # Normalize to str (with None preserved) on both sides so the
+            # caller's `df_merge_key.isin(existing_keys)` actually matches.
+            # See companion code in _upsert: pandas often has the PK column
+            # as int64 while Vertica stores varchar, so a raw compare misses
+            # every row and the "N new + 0 updated" metrics in the log are
+            # always wrong.
+            def _norm(v):
+                return None if v is None else str(v)
+
             if len(pk_columns) == 1:
-                # Single column PK
-                return set(row[0] for row in existing_data)
+                return set(_norm(row[0]) for row in existing_data)
             else:
-                # Multi-column PK
-                return set(tuple(row) for row in existing_data)
+                return set(tuple(_norm(v) for v in row) for row in existing_data)
 
         except Exception as e:
             logger.warning(f"Failed to query existing keys: {e}, assuming no existing data")

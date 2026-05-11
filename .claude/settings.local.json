@@ -121,7 +121,17 @@
       "Bash(.venv/Scripts/python.exe _tmp_4plat_db.py)",
       "Bash(.venv/Scripts/python.exe _tmp_deep.py)",
       "PowerShell(\"=== Storia rate limit + deferred retry per il run di stanotte ===\")",
-      "PowerShell($query = \"ContainerAppConsoleLogs_CL | where ContainerGroupName_s startswith 'caj-social-facebook-prod-sdc-29636760' | where Log_s contains 'Rate limit hit' or Log_s contains 'parked in deferred' or Log_s contains 'Deferred retry' or Log_s contains 'Definitely failed' or Log_s contains 'Application request limit' or Log_s contains 'Failed to fetch chunk' or Log_s contains 'Inline retries exhausted' or Log_s contains 'Retrieved' and Log_s contains 'total insight records' or Log_s contains 'Deferred retry recovered' | order by TimeGenerated asc | project TimeGenerated, Log_s | take 60\")"
+      "PowerShell($query = \"ContainerAppConsoleLogs_CL | where ContainerGroupName_s startswith 'caj-social-facebook-prod-sdc-29636760' | where Log_s contains 'Rate limit hit' or Log_s contains 'parked in deferred' or Log_s contains 'Deferred retry' or Log_s contains 'Definitely failed' or Log_s contains 'Application request limit' or Log_s contains 'Failed to fetch chunk' or Log_s contains 'Inline retries exhausted' or Log_s contains 'Retrieved' and Log_s contains 'total insight records' or Log_s contains 'Deferred retry recovered' | order by TimeGenerated asc | project TimeGenerated, Log_s | take 60\")",
+      "PowerShell(az containerapp job execution list --name caj-social-microsoft-prod-sdc --resource-group rg-digitalreport-etl-prod-sdc --query \"[].{name:name, status:properties.status, startTime:properties.startTime, endTime:properties.endTime}\" -o table 2>$null)",
+      "PowerShell(\"=== Ultime esecuzioni Microsoft ===\")",
+      "PowerShell(\"=== Image dell'ultima esecuzione ===\")",
+      "PowerShell($query = \"ContainerAppConsoleLogs_CL | where ContainerJobName_s == 'caj-social-microsoft-prod-sdc' | where TimeGenerated > ago\\(2h\\) | summarize image = any\\(ContainerImage_s\\), first_log = min\\(TimeGenerated\\), last_log = max\\(TimeGenerated\\) by ContainerGroupName_s | order by first_log desc | take 3\")",
+      "PowerShell(\"=== Log run Microsoft asdybdt ===\")",
+      "PowerShell($query = \"ContainerAppConsoleLogs_CL | where ContainerGroupName_s startswith 'caj-social-microsoft-prod-sdc-asdybdt' | where Log_s contains 'upsert' or Log_s contains 'AUTO-DETECTED' or Log_s contains 'EXPLICIT' or Log_s contains 'PK=' or Log_s contains 'Loaded' and Log_s contains 'rows to' or Log_s contains 'MERGE' or Log_s contains 'ERROR' or Log_s contains 'INT64_MIN' or Log_s contains 'BEFORE drop' or Log_s contains 'AFTER drop' | order by TimeGenerated asc | project TimeGenerated, Log_s | take 50\")",
+      "Bash(.venv/Scripts/python.exe _tmp_ms_check.py)",
+      "Bash(.venv/Scripts/python.exe _tmp_lk_gg_check.py)",
+      "PowerShell(\"=== Ultime esecuzioni Facebook ===\")",
+      "PowerShell($query = \"ContainerAppConsoleLogs_CL | where ContainerJobName_s == 'caj-social-facebook-prod-sdc' | where TimeGenerated > ago\\(3h\\) | summarize image = any\\(ContainerImage_s\\), first_log = min\\(TimeGenerated\\), last_log = max\\(TimeGenerated\\) by ContainerGroupName_s | order by first_log desc | take 3\")"
     ],
     "deny": [],
     "ask": []
