@@ -296,6 +296,9 @@ class FacebookHTTPClient:
             logger.success(f"Retrieved {len(insight_list)} insight records")
             return insight_list
 
+        except AuthenticationError:
+            # Let token errors propagate unchanged so the run can fail fast.
+            raise
         except Exception as e:
             logger.error(f"Failed to fetch insights: {e}")
             raise APIError(
@@ -486,6 +489,9 @@ class FacebookHTTPClient:
             logger.success(f"Retrieved {len(conversion_list)} custom conversions")
             return conversion_list
 
+        except AuthenticationError:
+            # Let token errors propagate unchanged so the run can fail fast.
+            raise
         except Exception as e:
             logger.error(f"Failed to fetch custom conversions: {e}")
             raise APIError(
@@ -516,6 +522,16 @@ class FacebookHTTPClient:
                 return result
 
             except Exception as e:
+                # Token expired/invalid is NOT transient: retrying or deferring
+                # it just burns time until the 2h replica timeout kills the job
+                # (and the kill prevents the execution summary from being written).
+                # Abort immediately so the pipeline fails fast with exit code 2.
+                if self._is_auth_error(e):
+                    logger.error(f"Facebook access token expired or invalid: {e}")
+                    raise AuthenticationError(
+                        "Facebook access token expired or invalid",
+                        details={"error": str(e)},
+                    ) from e
                 if attempt < max_retries - 1:
                     # Calculate backoff delay
                     delay = RATE_LIMIT_DELAY_SECONDS * (BACKOFF_FACTOR ** attempt)
@@ -530,6 +546,25 @@ class FacebookHTTPClient:
                         f"API call failed after {max_retries} attempts",
                         details={"error": str(e), "attempts": max_retries},
                     )
+
+    @staticmethod
+    def _is_auth_error(error: Exception) -> bool:
+        """Return True if the error is a Facebook access-token problem.
+
+        Meta returns HTTP 400 with error code 190 (subcode 463 = session
+        expired, 467 = invalid token) for token issues. These are permanent
+        for the run and must abort fast, unlike rate-limit errors (codes 4/17/
+        32/613) which are transient and worth retrying. Matching is on the
+        token-specific code/text only, so genuine rate limits are NOT caught.
+        """
+        msg = str(error).lower()
+        return (
+            "error validating access token" in msg
+            or "session has expired" in msg
+            or "session is invalid" in msg
+            or '"code": 190' in msg
+            or "(#190)" in msg
+        )
 
     def _generate_date_chunks(
         self,

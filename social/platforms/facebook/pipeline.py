@@ -28,7 +28,7 @@ import pandas as pd
 import yaml
 from loguru import logger
 
-from social.core.exceptions import ConfigurationError, PipelineError
+from social.core.exceptions import AuthenticationError, ConfigurationError, PipelineError
 from social.core.protocols import DataSink, TokenProvider
 from social.platforms.facebook.adapter import FacebookAdapter
 from social.platforms.facebook.processor import FacebookProcessor
@@ -153,6 +153,11 @@ class FacebookPipeline:
             try:
                 df, stats = self.run(table_name, load_to_sink=True)
                 results_stats[table_name] = stats
+            except AuthenticationError:
+                # A token error affects every table - don't waste time trying
+                # the rest. Abort so the run fails fast with exit code 2.
+                logger.error("Authentication error - aborting remaining tables")
+                raise
             except Exception as e:
                 error_msg = str(e)
                 logger.error(f"Failed to process table {table_name}: {error_msg}")

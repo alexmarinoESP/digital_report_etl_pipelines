@@ -437,6 +437,10 @@ def run_pipeline(
             }
         }
 
+    except AuthenticationError:
+        # Propagate token errors unchanged so main() maps them to exit code 2
+        # (and writes the failure execution summary) instead of a generic exit 3.
+        raise
     except Exception as e:
         logger.error(f"Pipeline execution failed: {e}")
         raise PipelineError("Pipeline execution failed") from e
