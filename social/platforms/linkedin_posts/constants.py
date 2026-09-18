@@ -15,7 +15,7 @@ from typing import Dict, Final, NamedTuple
 
 # API Configuration
 API_BASE_URL: Final[str] = "https://api.linkedin.com/rest"
-API_VERSION: Final[str] = "202509"
+API_VERSION: Final[str] = "202609"
 
 # Data extraction configuration
 POSTS_LOOKBACK_DAYS: Final[int] = 365  # 1 year of posts

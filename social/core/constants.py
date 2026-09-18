@@ -25,7 +25,7 @@ REQUEST_TIMEOUT_SECONDS: Final[int] = 30
 RATE_LIMIT_DELAY_SECONDS: Final[int] = 60
 
 # LinkedIn specific constants
-LINKEDIN_API_VERSION: Final[str] = "202509"  # Must match old project version
+LINKEDIN_API_VERSION: Final[str] = "202609"  # LinkedIn sunsets versions after ~12 months (202509 dead since 2026-09-16)
 LINKEDIN_MAX_PAGE_SIZE: Final[int] = 10000
 LINKEDIN_DEFAULT_TIME_GRANULARITY: Final[str] = "DAILY"
 

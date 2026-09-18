@@ -9,7 +9,7 @@ class LinkedinEndPoint(Enum):
     """LinkedIn API endpoint definitions."""
 
     API_BASE_PATH = "https://api.linkedin.com/rest"
-    VERSION = "202509"  # LinkedIn API version (September 2025)
+    VERSION = "202609"  # LinkedIn API version (September 2026)
 
     # Campaign endpoints
     CAMPAIGNS = "{}/adAccounts/{}/adCampaigns"
